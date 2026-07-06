@@ -4,7 +4,14 @@ Self-hosted MCP server for connecting ChatGPT / Workspace Agents to a Design Sys
 
 ## What this provides
 
-Initial tools:
+This server supports two integration modes:
+
+| Mode | Endpoint | Use case |
+|---|---|---|
+| MCP native connector | `/mcp` | ChatGPT Apps & Connectors / MCP connector |
+| REST wrapper | `/api/...` | Custom GPT Actions using OpenAPI YAML |
+
+Initial MCP tools:
 
 | Tool | Type | Purpose |
 |---|---|---|
@@ -12,13 +19,21 @@ Initial tools:
 | `ds_get_request` | read | Fetch design request context by `request_id` |
 | `ds_submit_agent_result` | write | Submit a completed agent review result back to the system |
 
-This repo is intentionally small. It is the public-MCP foundation for a larger workflow:
+REST endpoints for GPT Actions:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/health` | Health check |
+| `GET` | `/api/design-requests/{request_id}` | Fetch design request by ID |
+| `POST` | `/api/agent-results` | Submit final agent review result |
+
+This repo is intentionally small. It is the public-MCP and REST-action foundation for a larger workflow:
 
 ```text
 Design System Backend
-  -> triggers ChatGPT Workspace Agent
-  -> Agent reads context through this MCP server
-  -> Agent submits result through ds_submit_agent_result
+  -> triggers ChatGPT Workspace Agent or Custom GPT
+  -> Agent reads request context through MCP or REST Actions
+  -> Agent submits result through ds_submit_agent_result or POST /api/agent-results
   -> Backend stores result and updates UI
 ```
 
@@ -48,6 +63,35 @@ Root check:
 curl http://localhost:8787/
 ```
 
+REST test:
+
+```bash
+curl http://localhost:8787/api/design-requests/DSR-001
+```
+
+Submit test result:
+
+```bash
+curl -X POST http://localhost:8787/api/agent-results \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_id": "DSR-001",
+    "decision": "revise",
+    "summary": "Mobile layout needs cleanup before implementation.",
+    "risk_level": "medium",
+    "frontend_tasks": [
+      {
+        "title": "Fix InvoiceCard mobile overflow",
+        "acceptance_criteria": [
+          "No horizontal scroll at 360px viewport",
+          "Invoice content remains readable in mobile card"
+        ]
+      }
+    ],
+    "validation": ["Run typecheck", "Test 360px viewport"]
+  }'
+```
+
 ## Test with MCP Inspector
 
 ```bash
@@ -70,7 +114,7 @@ Use the public MCP endpoint in ChatGPT:
 https://<your-ngrok-domain>/mcp
 ```
 
-## ChatGPT connector setup
+## ChatGPT MCP connector setup
 
 In ChatGPT:
 
@@ -89,6 +133,25 @@ Name: Design System MCP
 URL: https://<your-public-domain>/mcp
 ```
 
+## Custom GPT Actions setup
+
+Use `openapi.yaml` in this repo when configuring Custom GPT Actions.
+
+Important: Custom GPT Actions should call REST endpoints, not `/mcp` directly.
+
+Use server URL:
+
+```text
+https://<your-public-domain>
+```
+
+Available action paths:
+
+```text
+GET  /api/design-requests/{request_id}
+POST /api/agent-results
+```
+
 ## Optional bearer auth
 
 For local prototype, `MCP_BEARER_TOKEN` may be empty.
@@ -99,15 +162,17 @@ Before exposing to the internet, set:
 MCP_BEARER_TOKEN=replace-with-a-long-random-token
 ```
 
-Then clients must send:
+Then MCP clients must send:
 
 ```http
 Authorization: Bearer replace-with-a-long-random-token
 ```
 
+Note: the REST wrapper currently does not require this bearer token. Add real auth before using it with sensitive data.
+
 ## Backend result forwarding
 
-`ds_submit_agent_result` stores result in memory and can also forward to your backend:
+`ds_submit_agent_result` and `POST /api/agent-results` store result in memory and can also forward to your backend:
 
 ```env
 DS_BACKEND_URL=https://your-backend.example.com
@@ -135,7 +200,8 @@ npm start          # run compiled server
 
 Minimum controls before production:
 
-- Set `MCP_BEARER_TOKEN` or implement OAuth.
+- Set `MCP_BEARER_TOKEN` or implement OAuth for MCP.
+- Add auth for REST endpoints before using real data.
 - Keep write tools narrow and schema-validated.
 - Do not expose destructive tools in MVP.
 - Do not put secrets in tool output.
