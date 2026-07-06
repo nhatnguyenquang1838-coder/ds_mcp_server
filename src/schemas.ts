@@ -26,6 +26,37 @@ export const githubUpsertFileSchema = z.object({
   message: z.string().min(1)
 });
 
+export const githubApplyTextPatchSchema = z.object({
+  path: z.string().min(1),
+  branch: z.string().min(1),
+  message: z.string().min(1),
+  old_text: z.string().min(1),
+  new_text: z.string(),
+  expected_replacements: z.number().int().positive().optional(),
+  replace_all: z.boolean().optional()
+});
+
+export const githubCommitFilesSchema = z.object({
+  branch: z.string().min(1),
+  message: z.string().min(1),
+  files: z
+    .array(
+      z.object({
+        path: z.string().min(1),
+        content: z.string()
+      })
+    )
+    .optional(),
+  deletions: z.array(z.string().min(1)).optional(),
+  expected_base_sha: z.string().min(1).optional()
+});
+
+export const githubDeleteFileSchema = z.object({
+  path: z.string().min(1),
+  branch: z.string().min(1),
+  message: z.string().min(1)
+});
+
 export const githubCreatePullRequestSchema = z.object({
   title: z.string().min(1),
   head: z.string().min(1),
@@ -34,8 +65,20 @@ export const githubCreatePullRequestSchema = z.object({
   draft: z.boolean().optional()
 });
 
+export const githubMergePullRequestSchema = z.object({
+  commit_title: z.string().min(1).optional(),
+  commit_message: z.string().optional(),
+  merge_method: z.enum(["merge", "squash", "rebase"]).optional()
+});
+
 export const githubCommentPullRequestSchema = z.object({
   body: z.string().min(1)
+});
+
+export const githubDispatchWorkflowSchema = z.object({
+  workflow_id: z.union([z.string().min(1), z.number().int().positive()]),
+  ref: z.string().min(1),
+  inputs: z.record(z.union([z.string(), z.number(), z.boolean()])).optional()
 });
 
 export const workspaceAgentRunTriggerSchema = z.object({
