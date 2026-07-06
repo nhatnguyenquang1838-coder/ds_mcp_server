@@ -134,6 +134,11 @@ function assertSafePath(path: string): void {
   }
 }
 
+function toGitHubContentPath(path: string): string {
+  assertSafePath(path);
+  return path.split("/").map(encodeURIComponent).join("/");
+}
+
 function assertWritableBranch(config: AppConfig, branch: string): void {
   const protectedBranches = new Set(["main", "master", "production", "prod"]);
 
@@ -192,7 +197,7 @@ async function tryGetFileSha(
   try {
     const file = await githubFetch<GitHubContentResponse>(
       config,
-      `/repos/${owner}/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(ref)}`
+      `/repos/${owner}/${repo}/contents/${toGitHubContentPath(path)}?ref=${encodeURIComponent(ref)}`
     );
     return file.sha;
   } catch (error) {
@@ -230,7 +235,7 @@ export async function githubReadFile(
   const query = input.ref ? `?ref=${encodeURIComponent(input.ref)}` : "";
   const file = await githubFetch<GitHubContentResponse>(
     config,
-    `/repos/${input.owner}/${input.repo}/contents/${encodeURIComponent(input.path)}${query}`
+    `/repos/${input.owner}/${input.repo}/contents/${toGitHubContentPath(input.path)}${query}`
   );
 
   if (file.type !== "file" || file.encoding !== "base64" || !file.content) {
@@ -305,7 +310,7 @@ export async function githubUpsertFile(
 
   const result = await githubFetch<GitHubUpsertResponse>(
     config,
-    `/repos/${input.owner}/${input.repo}/contents/${encodeURIComponent(input.path)}`,
+    `/repos/${input.owner}/${input.repo}/contents/${toGitHubContentPath(input.path)}`,
     {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
