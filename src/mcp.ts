@@ -3,11 +3,20 @@ import { z } from "zod";
 import type { AppConfig } from "./config.js";
 import { forwardAgentResultToBackend } from "./tools/backendClient.js";
 import { getDesignRequest, submitAgentResult } from "./tools/designSystemStore.js";
+import {
+  githubCommentPullRequest,
+  githubCreateBranch,
+  githubCreatePullRequest,
+  githubGetRepo,
+  githubGetWorkflowRuns,
+  githubReadFile,
+  githubUpsertFile
+} from "./tools/githubClient.js";
 
 export function createMcpServer(config: AppConfig): McpServer {
   const server = new McpServer({
     name: "design-system-mcp",
-    version: "0.1.0"
+    version: "0.2.0"
   });
 
   server.registerTool(
@@ -29,7 +38,7 @@ export function createMcpServer(config: AppConfig): McpServer {
       const output = {
         ok: true,
         service: "design-system-mcp",
-        version: "0.1.0"
+        version: "0.2.0"
       };
 
       return {
@@ -113,6 +122,165 @@ export function createMcpServer(config: AppConfig): McpServer {
         backend_status: forwardResult.status
       };
 
+      return {
+        structuredContent: output,
+        content: [{ type: "text", text: JSON.stringify(output) }]
+      };
+    }
+  );
+
+  server.registerTool(
+    "github_get_repo",
+    {
+      title: "Get GitHub repository",
+      description: "Get metadata for an allowlisted GitHub repository.",
+      inputSchema: {
+        owner: z.string().min(1),
+        repo: z.string().min(1)
+      },
+      annotations: { readOnlyHint: true }
+    },
+    async (input) => {
+      const output = await githubGetRepo(config, input);
+      return {
+        structuredContent: output,
+        content: [{ type: "text", text: JSON.stringify(output) }]
+      };
+    }
+  );
+
+  server.registerTool(
+    "github_read_file",
+    {
+      title: "Read GitHub file",
+      description: "Read a UTF-8 file from an allowlisted GitHub repository.",
+      inputSchema: {
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        path: z.string().min(1),
+        ref: z.string().optional()
+      },
+      annotations: { readOnlyHint: true }
+    },
+    async (input) => {
+      const output = await githubReadFile(config, input);
+      return {
+        structuredContent: output,
+        content: [{ type: "text", text: JSON.stringify(output) }]
+      };
+    }
+  );
+
+  server.registerTool(
+    "github_create_branch",
+    {
+      title: "Create GitHub branch",
+      description:
+        "Create a guarded branch from the default base branch or a provided base branch. Branch must use an allowed prefix.",
+      inputSchema: {
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        branch: z.string().min(1),
+        from_branch: z.string().optional()
+      },
+      annotations: { readOnlyHint: false }
+    },
+    async (input) => {
+      const output = await githubCreateBranch(config, input);
+      return {
+        structuredContent: output,
+        content: [{ type: "text", text: JSON.stringify(output) }]
+      };
+    }
+  );
+
+  server.registerTool(
+    "github_upsert_file",
+    {
+      title: "Create or update GitHub file",
+      description:
+        "Create or update a UTF-8 file on a guarded non-main branch. Always read existing content before using this tool.",
+      inputSchema: {
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        path: z.string().min(1),
+        content: z.string(),
+        branch: z.string().min(1),
+        message: z.string().min(1)
+      },
+      annotations: { readOnlyHint: false }
+    },
+    async (input) => {
+      const output = await githubUpsertFile(config, input);
+      return {
+        structuredContent: output,
+        content: [{ type: "text", text: JSON.stringify(output) }]
+      };
+    }
+  );
+
+  server.registerTool(
+    "github_create_pr",
+    {
+      title: "Create GitHub pull request",
+      description: "Create a pull request from a guarded branch to the default base branch.",
+      inputSchema: {
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        title: z.string().min(1),
+        head: z.string().min(1),
+        base: z.string().optional(),
+        body: z.string().optional(),
+        draft: z.boolean().optional()
+      },
+      annotations: { readOnlyHint: false }
+    },
+    async (input) => {
+      const output = await githubCreatePullRequest(config, input);
+      return {
+        structuredContent: output,
+        content: [{ type: "text", text: JSON.stringify(output) }]
+      };
+    }
+  );
+
+  server.registerTool(
+    "github_get_workflow_runs",
+    {
+      title: "Get GitHub Actions workflow runs",
+      description: "Get recent GitHub Actions workflow runs for an allowlisted repository.",
+      inputSchema: {
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        branch: z.string().optional(),
+        per_page: z.number().int().min(1).max(30).optional()
+      },
+      annotations: { readOnlyHint: true }
+    },
+    async (input) => {
+      const output = await githubGetWorkflowRuns(config, input);
+      return {
+        structuredContent: output,
+        content: [{ type: "text", text: JSON.stringify(output) }]
+      };
+    }
+  );
+
+  server.registerTool(
+    "github_comment_pr",
+    {
+      title: "Comment on GitHub pull request",
+      description: "Add a comment to a pull request in an allowlisted repository.",
+      inputSchema: {
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        pr_number: z.number().int().positive(),
+        body: z.string().min(1)
+      },
+      annotations: { readOnlyHint: false }
+    },
+    async (input) => {
+      const output = await githubCommentPullRequest(config, input);
       return {
         structuredContent: output,
         content: [{ type: "text", text: JSON.stringify(output) }]

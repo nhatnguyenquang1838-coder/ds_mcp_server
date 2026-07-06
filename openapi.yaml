@@ -2,8 +2,8 @@ openapi: 3.1.0
 
 info:
   title: Design System Review API
-  version: 1.0.0
-  description: API REST wrapper cho Design System Review Agent. Không gọi trực tiếp MCP /mcp.
+  version: 1.1.0
+  description: REST wrapper cho Design System Review Agent và GitHub gateway. Không gọi trực tiếp MCP /mcp.
 
 servers:
   - url: https://ds-mcp-server-theta.vercel.app
@@ -70,27 +70,221 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  ok:
-                    type: boolean
-                  request_id:
-                    type: string
-                  stored:
-                    type: boolean
-                  forwarded_to_backend:
-                    type: boolean
-                  backend_status:
-                    type: integer
-                required:
-                  - ok
-                  - request_id
-                  - stored
-                  - forwarded_to_backend
+                $ref: "#/components/schemas/AgentResultResponse"
         "400":
           description: Payload không hợp lệ
 
+  /api/github/repos/{owner}/{repo}:
+    get:
+      summary: Lấy metadata GitHub repo
+      operationId: githubGetRepo
+      x-openai-isConsequential: false
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+      responses:
+        "200":
+          description: GitHub repo metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubRepo"
+        "400":
+          description: Repo không được allowlist hoặc GitHub API lỗi
+
+  /api/github/repos/{owner}/{repo}/files:
+    get:
+      summary: Đọc file UTF-8 từ GitHub repo
+      operationId: githubReadFile
+      x-openai-isConsequential: false
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+        - name: path
+          in: query
+          required: true
+          description: Đường dẫn file trong repo, ví dụ README.md hoặc src/server.ts
+          schema:
+            type: string
+        - name: ref
+          in: query
+          required: false
+          description: Branch, tag, hoặc commit SHA. Nếu bỏ trống sẽ dùng default branch.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Nội dung file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubFile"
+        "400":
+          description: Không đọc được file
+
+    post:
+      summary: Tạo hoặc cập nhật file trên branch GitHub được guardrail
+      operationId: githubUpsertFile
+      x-openai-isConsequential: true
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubUpsertFileInput"
+      responses:
+        "200":
+          description: File đã được tạo hoặc cập nhật
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubUpsertFileResponse"
+        "400":
+          description: Không thể ghi file
+
+  /api/github/repos/{owner}/{repo}/branches:
+    post:
+      summary: Tạo branch GitHub từ base branch
+      operationId: githubCreateBranch
+      x-openai-isConsequential: true
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                branch:
+                  type: string
+                  description: Branch mới. Phải bắt đầu bằng feature/, fix/, chore/, docs/, hoặc ai/.
+                  example: feature/add-github-gateway
+                from_branch:
+                  type: string
+                  description: Base branch. Nếu bỏ trống dùng main.
+                  example: main
+              required:
+                - branch
+      responses:
+        "200":
+          description: Branch đã tạo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubBranch"
+        "400":
+          description: Không thể tạo branch
+
+  /api/github/repos/{owner}/{repo}/pull-requests:
+    post:
+      summary: Tạo GitHub pull request
+      operationId: githubCreatePullRequest
+      x-openai-isConsequential: true
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubCreatePullRequestInput"
+      responses:
+        "200":
+          description: Pull request đã tạo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubPullRequest"
+        "400":
+          description: Không thể tạo PR
+
+  /api/github/repos/{owner}/{repo}/pull-requests/{pr_number}/comments:
+    post:
+      summary: Comment vào GitHub pull request
+      operationId: githubCommentPullRequest
+      x-openai-isConsequential: true
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+        - name: pr_number
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body:
+                  type: string
+              required:
+                - body
+      responses:
+        "200":
+          description: Comment đã tạo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubComment"
+        "400":
+          description: Không thể comment PR
+
+  /api/github/repos/{owner}/{repo}/workflow-runs:
+    get:
+      summary: Lấy GitHub Actions workflow runs gần đây
+      operationId: githubGetWorkflowRuns
+      x-openai-isConsequential: false
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+        - name: branch
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 30
+      responses:
+        "200":
+          description: Danh sách workflow runs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubWorkflowRuns"
+        "400":
+          description: Không thể lấy workflow runs
+
 components:
+  parameters:
+    Owner:
+      name: owner
+      in: path
+      required: true
+      schema:
+        type: string
+      example: nhatnguyenquang1838-coder
+    Repo:
+      name: repo
+      in: path
+      required: true
+      schema:
+        type: string
+      example: ds_mcp_server
+
   schemas:
     DesignRequest:
       type: object
@@ -106,24 +300,14 @@ components:
           example: rental_home
         status:
           type: string
-          enum:
-            - open
-            - in_review
-            - approved
-            - rejected
-            - not_found
+          enum: [open, in_review, approved, rejected, not_found]
         requirement:
           type: string
         figmaUrl:
           type: string
         githubUrl:
           type: string
-      required:
-        - id
-        - title
-        - project
-        - status
-        - requirement
+      required: [id, title, project, status, requirement]
 
     FrontendTask:
       type: object
@@ -134,9 +318,7 @@ components:
           type: array
           items:
             type: string
-      required:
-        - title
-        - acceptance_criteria
+      required: [title, acceptance_criteria]
 
     AgentResultInput:
       type: object
@@ -146,18 +328,12 @@ components:
           example: DSR-001
         decision:
           type: string
-          enum:
-            - approve
-            - revise
-            - reject
+          enum: [approve, revise, reject]
         summary:
           type: string
         risk_level:
           type: string
-          enum:
-            - low
-            - medium
-            - high
+          enum: [low, medium, high]
         frontend_tasks:
           type: array
           items:
@@ -166,10 +342,181 @@ components:
           type: array
           items:
             type: string
-      required:
-        - request_id
-        - decision
-        - summary
-        - risk_level
-        - frontend_tasks
-        - validation
+      required: [request_id, decision, summary, risk_level, frontend_tasks, validation]
+
+    AgentResultResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        request_id:
+          type: string
+        stored:
+          type: boolean
+        forwarded_to_backend:
+          type: boolean
+        backend_status:
+          type: integer
+      required: [ok, request_id, stored, forwarded_to_backend]
+
+    GitHubRepo:
+      type: object
+      properties:
+        full_name:
+          type: string
+        private:
+          type: boolean
+        default_branch:
+          type: string
+        html_url:
+          type: string
+        permissions:
+          type: object
+          additionalProperties:
+            type: boolean
+      required: [full_name, private, default_branch, html_url]
+
+    GitHubFile:
+      type: object
+      properties:
+        owner:
+          type: string
+        repo:
+          type: string
+        path:
+          type: string
+        ref:
+          type: string
+        sha:
+          type: string
+        content:
+          type: string
+        encoding:
+          type: string
+          enum: [utf-8]
+        html_url:
+          type: string
+      required: [owner, repo, path, content, encoding]
+
+    GitHubBranch:
+      type: object
+      properties:
+        owner:
+          type: string
+        repo:
+          type: string
+        branch:
+          type: string
+        sha:
+          type: string
+      required: [owner, repo, branch, sha]
+
+    GitHubUpsertFileInput:
+      type: object
+      properties:
+        path:
+          type: string
+          example: docs/example.md
+        content:
+          type: string
+        branch:
+          type: string
+          example: feature/example
+        message:
+          type: string
+          example: docs: update example
+      required: [path, content, branch, message]
+
+    GitHubUpsertFileResponse:
+      type: object
+      properties:
+        owner:
+          type: string
+        repo:
+          type: string
+        path:
+          type: string
+        branch:
+          type: string
+        content_sha:
+          type: string
+        commit_sha:
+          type: string
+        html_url:
+          type: string
+      required: [owner, repo, path, branch]
+
+    GitHubCreatePullRequestInput:
+      type: object
+      properties:
+        title:
+          type: string
+        head:
+          type: string
+          description: Source branch. Must use allowed prefix.
+        base:
+          type: string
+          default: main
+        body:
+          type: string
+        draft:
+          type: boolean
+      required: [title, head]
+
+    GitHubPullRequest:
+      type: object
+      properties:
+        number:
+          type: integer
+        html_url:
+          type: string
+        state:
+          type: string
+        title:
+          type: string
+        head:
+          type: object
+        base:
+          type: object
+      required: [number, html_url, state, title]
+
+    GitHubComment:
+      type: object
+      properties:
+        id:
+          type: integer
+        html_url:
+          type: string
+        body:
+          type: string
+      required: [id, html_url, body]
+
+    GitHubWorkflowRuns:
+      type: object
+      properties:
+        total_count:
+          type: integer
+        workflow_runs:
+          type: array
+          items:
+            type: object
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              head_branch:
+                type: string
+              head_sha:
+                type: string
+              status:
+                type: string
+              conclusion:
+                type: string
+              html_url:
+                type: string
+              created_at:
+                type: string
+              updated_at:
+                type: string
+      required: [total_count, workflow_runs]

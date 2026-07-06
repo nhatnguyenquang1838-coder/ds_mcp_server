@@ -6,8 +6,19 @@ import { createMcpServer } from "./mcp.js";
 import { agentResultSchema } from "./schemas.js";
 import { forwardAgentResultToBackend } from "./tools/backendClient.js";
 import { getDesignRequest, submitAgentResult } from "./tools/designSystemStore.js";
+import {
+  githubCommentPullRequest,
+  githubCreateBranch,
+  githubCreatePullRequest,
+  githubGetRepo,
+  githubGetWorkflowRuns,
+  githubReadFile,
+  githubUpsertFile
+} from "./tools/githubClient.js";
 
 const config = loadConfig();
+
+type JsonRecord = Record<string, unknown>;
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   res.writeHead(statusCode, { "content-type": "application/json" });
@@ -30,6 +41,25 @@ function isAuthorized(req: IncomingMessage): boolean {
   return authHeader === `Bearer ${config.mcpBearerToken}`;
 }
 
+function asRecord(value: unknown): JsonRecord {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  return value as JsonRecord;
+}
+
+function asString(value: unknown, fallback = ""): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function asBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function asNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
 
@@ -46,6 +76,153 @@ async function readJsonBody(req: IncomingMessage): Promise<unknown> {
   return JSON.parse(rawBody) as unknown;
 }
 
+function repoRoute(url: URL, suffix = ""): RegExpMatchArray | null {
+  const normalizedSuffix = suffix ? `/${suffix}` : "";
+  return url.pathname.match(new RegExp(`^/api/github/repos/([^/]+)/([^/]+)${normalizedSuffix}$`));
+}
+
+function repoInput(match: RegExpMatchArray): { owner: string; repo: string } {
+  return {
+    owner: decodeURIComponent(match[1] ?? ""),
+    repo: decodeURIComponent(match[2] ?? "")
+  };
+}
+
+async function handleGitHubRestApi(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL
+): Promise<boolean> {
+  if (!url.pathname.startsWith("/api/github/")) return false;
+
+  setCorsHeaders(res);
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
+
+  try {
+    const repoMatch = repoRoute(url);
+
+    if (req.method === "GET" && repoMatch) {
+      sendJson(res, 200, await githubGetRepo(config, repoInput(repoMatch)));
+      return true;
+    }
+
+    const fileMatch = repoRoute(url, "files");
+
+    if (req.method === "GET" && fileMatch) {
+      const path = url.searchParams.get("path") || "";
+      const ref = url.searchParams.get("ref") || undefined;
+      sendJson(
+        res,
+        200,
+        await githubReadFile(config, {
+          ...repoInput(fileMatch),
+          path,
+          ref
+        })
+      );
+      return true;
+    }
+
+    const branchMatch = repoRoute(url, "branches");
+
+    if (req.method === "POST" && branchMatch) {
+      const body = asRecord(await readJsonBody(req));
+      sendJson(
+        res,
+        200,
+        await githubCreateBranch(config, {
+          ...repoInput(branchMatch),
+          branch: asString(body.branch),
+          from_branch: asString(body.from_branch) || undefined
+        })
+      );
+      return true;
+    }
+
+    if (req.method === "POST" && fileMatch) {
+      const body = asRecord(await readJsonBody(req));
+      sendJson(
+        res,
+        200,
+        await githubUpsertFile(config, {
+          ...repoInput(fileMatch),
+          path: asString(body.path),
+          content: asString(body.content),
+          branch: asString(body.branch),
+          message: asString(body.message)
+        })
+      );
+      return true;
+    }
+
+    const prMatch = repoRoute(url, "pull-requests");
+
+    if (req.method === "POST" && prMatch) {
+      const body = asRecord(await readJsonBody(req));
+      sendJson(
+        res,
+        200,
+        await githubCreatePullRequest(config, {
+          ...repoInput(prMatch),
+          title: asString(body.title),
+          head: asString(body.head),
+          base: asString(body.base) || undefined,
+          body: asString(body.body) || undefined,
+          draft: asBoolean(body.draft)
+        })
+      );
+      return true;
+    }
+
+    const workflowMatch = repoRoute(url, "workflow-runs");
+
+    if (req.method === "GET" && workflowMatch) {
+      sendJson(
+        res,
+        200,
+        await githubGetWorkflowRuns(config, {
+          ...repoInput(workflowMatch),
+          branch: url.searchParams.get("branch") || undefined,
+          per_page: asNumber(Number(url.searchParams.get("per_page") || 10), 10)
+        })
+      );
+      return true;
+    }
+
+    const commentMatch = url.pathname.match(
+      /^\/api\/github\/repos\/([^/]+)\/([^/]+)\/pull-requests\/(\d+)\/comments$/
+    );
+
+    if (req.method === "POST" && commentMatch) {
+      const body = asRecord(await readJsonBody(req));
+      sendJson(
+        res,
+        200,
+        await githubCommentPullRequest(config, {
+          owner: decodeURIComponent(commentMatch[1] ?? ""),
+          repo: decodeURIComponent(commentMatch[2] ?? ""),
+          pr_number: Number(commentMatch[3]),
+          body: asString(body.body)
+        })
+      );
+      return true;
+    }
+
+    sendJson(res, 404, { error: "GitHub API route not found" });
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "GitHub API failed";
+    const status = message.includes("not configured") ? 500 : 400;
+    sendJson(res, status, { error: message });
+    return true;
+  }
+}
+
 async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
   if (req.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
     setCorsHeaders(res);
@@ -53,6 +230,9 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
     res.end();
     return true;
   }
+
+  const handledGitHubApi = await handleGitHubRestApi(req, res, url);
+  if (handledGitHubApi) return true;
 
   const designRequestMatch = url.pathname.match(/^\/api\/design-requests\/([^/]+)$/);
 
@@ -119,7 +299,15 @@ const httpServer = createServer(async (req, res) => {
       ok: true,
       service: "design-system-mcp",
       mcp_path: config.mcpPath,
-      rest_paths: ["/api/design-requests/{request_id}", "/api/agent-results"]
+      rest_paths: [
+        "/api/design-requests/{request_id}",
+        "/api/agent-results",
+        "/api/github/repos/{owner}/{repo}",
+        "/api/github/repos/{owner}/{repo}/files",
+        "/api/github/repos/{owner}/{repo}/branches",
+        "/api/github/repos/{owner}/{repo}/pull-requests",
+        "/api/github/repos/{owner}/{repo}/workflow-runs"
+      ]
     });
   }
 
