@@ -12,11 +12,14 @@ import {
   githubReadFile,
   githubUpsertFile
 } from "./tools/githubClient.js";
+import { writeAuditEvent } from "./tools/auditLog.js";
+
+const serviceVersion = "0.3.0";
 
 export function createMcpServer(config: AppConfig): McpServer {
   const server = new McpServer({
     name: "design-system-mcp",
-    version: "0.2.0"
+    version: serviceVersion
   });
 
   server.registerTool(
@@ -38,7 +41,7 @@ export function createMcpServer(config: AppConfig): McpServer {
       const output = {
         ok: true,
         service: "design-system-mcp",
-        version: "0.2.0"
+        version: serviceVersion
       };
 
       return {
@@ -122,6 +125,13 @@ export function createMcpServer(config: AppConfig): McpServer {
         backend_status: forwardResult.status
       };
 
+      writeAuditEvent({
+        action: "ds_submit_agent_result",
+        source: "mcp",
+        request_id: input.request_id,
+        status: "success"
+      });
+
       return {
         structuredContent: output,
         content: [{ type: "text", text: JSON.stringify(output) }]
@@ -187,6 +197,14 @@ export function createMcpServer(config: AppConfig): McpServer {
     },
     async (input) => {
       const output = await githubCreateBranch(config, input);
+      writeAuditEvent({
+        action: "github_create_branch",
+        source: "mcp",
+        owner: input.owner,
+        repo: input.repo,
+        branch: output.branch,
+        status: "success"
+      });
       return {
         structuredContent: output,
         content: [{ type: "text", text: JSON.stringify(output) }]
@@ -212,6 +230,15 @@ export function createMcpServer(config: AppConfig): McpServer {
     },
     async (input) => {
       const output = await githubUpsertFile(config, input);
+      writeAuditEvent({
+        action: "github_upsert_file",
+        source: "mcp",
+        owner: input.owner,
+        repo: input.repo,
+        branch: input.branch,
+        path: input.path,
+        status: "success"
+      });
       return {
         structuredContent: output,
         content: [{ type: "text", text: JSON.stringify(output) }]
@@ -237,6 +264,15 @@ export function createMcpServer(config: AppConfig): McpServer {
     },
     async (input) => {
       const output = await githubCreatePullRequest(config, input);
+      writeAuditEvent({
+        action: "github_create_pr",
+        source: "mcp",
+        owner: input.owner,
+        repo: input.repo,
+        branch: input.head,
+        pr_number: output.number,
+        status: "success"
+      });
       return {
         structuredContent: output,
         content: [{ type: "text", text: JSON.stringify(output) }]
@@ -281,6 +317,14 @@ export function createMcpServer(config: AppConfig): McpServer {
     },
     async (input) => {
       const output = await githubCommentPullRequest(config, input);
+      writeAuditEvent({
+        action: "github_comment_pr",
+        source: "mcp",
+        owner: input.owner,
+        repo: input.repo,
+        pr_number: input.pr_number,
+        status: "success"
+      });
       return {
         structuredContent: output,
         content: [{ type: "text", text: JSON.stringify(output) }]
