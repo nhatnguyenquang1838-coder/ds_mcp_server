@@ -3,7 +3,13 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { ZodError } from "zod";
 import { loadConfig } from "./config.js";
 import { createMcpServer } from "./mcp.js";
-import { agentResultSchema } from "./schemas.js";
+import {
+  agentResultSchema,
+  githubCommentPullRequestSchema,
+  githubCreateBranchSchema,
+  githubCreatePullRequestSchema,
+  githubUpsertFileSchema
+} from "./schemas.js";
 import { forwardAgentResultToBackend } from "./tools/backendClient.js";
 import { getDesignRequest, submitAgentResult } from "./tools/designSystemStore.js";
 import {
@@ -15,10 +21,10 @@ import {
   githubReadFile,
   githubUpsertFile
 } from "./tools/githubClient.js";
+import { writeAuditEvent } from "./tools/auditLog.js";
 
 const config = loadConfig();
-
-type JsonRecord = Record<string, unknown>;
+const serviceVersion = "0.3.0";
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   res.writeHead(statusCode, { "content-type": "application/json" });
@@ -35,25 +41,16 @@ function setCorsHeaders(res: ServerResponse): void {
   res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
 }
 
-function isAuthorized(req: IncomingMessage): boolean {
+function isMcpAuthorized(req: IncomingMessage): boolean {
   if (!config.mcpBearerToken) return true;
   const authHeader = req.headers.authorization;
   return authHeader === `Bearer ${config.mcpBearerToken}`;
 }
 
-function asRecord(value: unknown): JsonRecord {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return {};
-  }
-  return value as JsonRecord;
-}
-
-function asString(value: unknown, fallback = ""): string {
-  return typeof value === "string" ? value : fallback;
-}
-
-function asBoolean(value: unknown, fallback = false): boolean {
-  return typeof value === "boolean" ? value : fallback;
+function isRestAuthorized(req: IncomingMessage): boolean {
+  if (!config.restApiBearerToken) return true;
+  const authHeader = req.headers.authorization;
+  return authHeader === `Bearer ${config.restApiBearerToken}`;
 }
 
 function asNumber(value: unknown, fallback: number): number {
@@ -85,6 +82,50 @@ function repoInput(match: RegExpMatchArray): { owner: string; repo: string } {
   return {
     owner: decodeURIComponent(match[1] ?? ""),
     repo: decodeURIComponent(match[2] ?? "")
+  };
+}
+
+function getCapabilities() {
+  return {
+    ok: true,
+    service: "design-system-mcp",
+    version: serviceVersion,
+    mcp_path: config.mcpPath,
+    mcp_tools: [
+      "ds_ping",
+      "ds_get_request",
+      "ds_submit_agent_result",
+      "github_get_repo",
+      "github_read_file",
+      "github_create_branch",
+      "github_upsert_file",
+      "github_create_pr",
+      "github_get_workflow_runs",
+      "github_comment_pr"
+    ],
+    rest_paths: [
+      "/api/capabilities",
+      "/api/design-requests/{request_id}",
+      "/api/agent-results",
+      "/api/github/repos/{owner}/{repo}",
+      "/api/github/repos/{owner}/{repo}/files",
+      "/api/github/repos/{owner}/{repo}/branches",
+      "/api/github/repos/{owner}/{repo}/pull-requests",
+      "/api/github/repos/{owner}/{repo}/pull-requests/{pr_number}/comments",
+      "/api/github/repos/{owner}/{repo}/workflow-runs"
+    ],
+    guardrails: {
+      github_allowed_repos: config.githubAllowedRepos,
+      github_default_base_branch: config.githubDefaultBaseBranch,
+      github_allowed_branch_prefixes: config.githubAllowedBranchPrefixes,
+      github_max_file_bytes: config.githubMaxFileBytes,
+      protected_branches: ["main", "master", "production", "prod"]
+    },
+    auth: {
+      mcp_bearer_token_configured: Boolean(config.mcpBearerToken),
+      rest_api_bearer_token_configured: Boolean(config.restApiBearerToken),
+      github_token_configured: Boolean(config.githubToken)
+    }
   };
 }
 
@@ -131,51 +172,68 @@ async function handleGitHubRestApi(
     const branchMatch = repoRoute(url, "branches");
 
     if (req.method === "POST" && branchMatch) {
-      const body = asRecord(await readJsonBody(req));
-      sendJson(
-        res,
-        200,
-        await githubCreateBranch(config, {
-          ...repoInput(branchMatch),
-          branch: asString(body.branch),
-          from_branch: asString(body.from_branch) || undefined
-        })
-      );
+      const body = githubCreateBranchSchema.parse(await readJsonBody(req));
+      const output = await githubCreateBranch(config, {
+        ...repoInput(branchMatch),
+        branch: body.branch,
+        from_branch: body.from_branch
+      });
+      writeAuditEvent({
+        action: "github_create_branch",
+        source: "rest",
+        owner: output.owner,
+        repo: output.repo,
+        branch: output.branch,
+        status: "success"
+      });
+      sendJson(res, 200, output);
       return true;
     }
 
     if (req.method === "POST" && fileMatch) {
-      const body = asRecord(await readJsonBody(req));
-      sendJson(
-        res,
-        200,
-        await githubUpsertFile(config, {
-          ...repoInput(fileMatch),
-          path: asString(body.path),
-          content: asString(body.content),
-          branch: asString(body.branch),
-          message: asString(body.message)
-        })
-      );
+      const body = githubUpsertFileSchema.parse(await readJsonBody(req));
+      const output = await githubUpsertFile(config, {
+        ...repoInput(fileMatch),
+        path: body.path,
+        content: body.content,
+        branch: body.branch,
+        message: body.message
+      });
+      writeAuditEvent({
+        action: "github_upsert_file",
+        source: "rest",
+        owner: output.owner,
+        repo: output.repo,
+        branch: output.branch,
+        path: output.path,
+        status: "success"
+      });
+      sendJson(res, 200, output);
       return true;
     }
 
     const prMatch = repoRoute(url, "pull-requests");
 
     if (req.method === "POST" && prMatch) {
-      const body = asRecord(await readJsonBody(req));
-      sendJson(
-        res,
-        200,
-        await githubCreatePullRequest(config, {
-          ...repoInput(prMatch),
-          title: asString(body.title),
-          head: asString(body.head),
-          base: asString(body.base) || undefined,
-          body: asString(body.body) || undefined,
-          draft: asBoolean(body.draft)
-        })
-      );
+      const body = githubCreatePullRequestSchema.parse(await readJsonBody(req));
+      const output = await githubCreatePullRequest(config, {
+        ...repoInput(prMatch),
+        title: body.title,
+        head: body.head,
+        base: body.base,
+        body: body.body,
+        draft: body.draft
+      });
+      writeAuditEvent({
+        action: "github_create_pr",
+        source: "rest",
+        owner: decodeURIComponent(prMatch[1] ?? ""),
+        repo: decodeURIComponent(prMatch[2] ?? ""),
+        branch: body.head,
+        pr_number: output.number,
+        status: "success"
+      });
+      sendJson(res, 200, output);
       return true;
     }
 
@@ -199,23 +257,41 @@ async function handleGitHubRestApi(
     );
 
     if (req.method === "POST" && commentMatch) {
-      const body = asRecord(await readJsonBody(req));
-      sendJson(
-        res,
-        200,
-        await githubCommentPullRequest(config, {
-          owner: decodeURIComponent(commentMatch[1] ?? ""),
-          repo: decodeURIComponent(commentMatch[2] ?? ""),
-          pr_number: Number(commentMatch[3]),
-          body: asString(body.body)
-        })
-      );
+      const body = githubCommentPullRequestSchema.parse(await readJsonBody(req));
+      const output = await githubCommentPullRequest(config, {
+        owner: decodeURIComponent(commentMatch[1] ?? ""),
+        repo: decodeURIComponent(commentMatch[2] ?? ""),
+        pr_number: Number(commentMatch[3]),
+        body: body.body
+      });
+      writeAuditEvent({
+        action: "github_comment_pr",
+        source: "rest",
+        owner: decodeURIComponent(commentMatch[1] ?? ""),
+        repo: decodeURIComponent(commentMatch[2] ?? ""),
+        pr_number: Number(commentMatch[3]),
+        status: "success"
+      });
+      sendJson(res, 200, output);
       return true;
     }
 
     sendJson(res, 404, { error: "GitHub API route not found" });
     return true;
   } catch (error) {
+    if (error instanceof SyntaxError) {
+      sendJson(res, 400, { error: "Invalid JSON body" });
+      return true;
+    }
+
+    if (error instanceof ZodError) {
+      sendJson(res, 400, {
+        error: "Invalid GitHub payload",
+        details: error.flatten()
+      });
+      return true;
+    }
+
     const message = error instanceof Error ? error.message : "GitHub API failed";
     const status = message.includes("not configured") ? 500 : 400;
     sendJson(res, status, { error: message });
@@ -228,6 +304,18 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
     setCorsHeaders(res);
     res.writeHead(204);
     res.end();
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/capabilities") {
+    setCorsHeaders(res);
+    sendJson(res, 200, getCapabilities());
+    return true;
+  }
+
+  if (url.pathname.startsWith("/api/") && !isRestAuthorized(req)) {
+    setCorsHeaders(res);
+    sendJson(res, 401, { error: "Unauthorized" });
     return true;
   }
 
@@ -259,6 +347,13 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
 
       await submitAgentResult(parsed);
       const forwardResult = await forwardAgentResultToBackend(config, parsed);
+
+      writeAuditEvent({
+        action: "ds_submit_agent_result",
+        source: "rest",
+        request_id: parsed.request_id,
+        status: "success"
+      });
 
       sendJson(res, 200, {
         ok: true,
@@ -295,20 +390,7 @@ const httpServer = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
 
   if (req.method === "GET" && url.pathname === "/") {
-    return sendJson(res, 200, {
-      ok: true,
-      service: "design-system-mcp",
-      mcp_path: config.mcpPath,
-      rest_paths: [
-        "/api/design-requests/{request_id}",
-        "/api/agent-results",
-        "/api/github/repos/{owner}/{repo}",
-        "/api/github/repos/{owner}/{repo}/files",
-        "/api/github/repos/{owner}/{repo}/branches",
-        "/api/github/repos/{owner}/{repo}/pull-requests",
-        "/api/github/repos/{owner}/{repo}/workflow-runs"
-      ]
-    });
+    return sendJson(res, 200, getCapabilities());
   }
 
   if (req.method === "GET" && url.pathname === "/health") {
@@ -330,7 +412,7 @@ const httpServer = createServer(async (req, res) => {
     return;
   }
 
-  if (!isAuthorized(req)) {
+  if (!isMcpAuthorized(req)) {
     return sendJson(res, 401, { error: "Unauthorized" });
   }
 
