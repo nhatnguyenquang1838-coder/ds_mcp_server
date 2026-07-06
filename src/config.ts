@@ -15,6 +15,8 @@ export type AppConfig = {
   workspaceAgentCallbackToken?: string;
   workspaceAgentApiBaseUrl: string;
   publicBaseUrl?: string;
+  supabaseUrl?: string;
+  supabaseServiceRoleKey?: string;
 };
 
 function readPort(value: string | undefined): number {
@@ -67,6 +69,8 @@ export function loadConfig(): AppConfig {
     workspaceAgentCallbackToken: process.env.WORKSPACE_AGENT_CALLBACK_TOKEN || undefined,
     workspaceAgentApiBaseUrl:
       process.env.WORKSPACE_AGENT_API_BASE_URL || "https://api.chatgpt.com",
-    publicBaseUrl: process.env.PUBLIC_BASE_URL || undefined
+    publicBaseUrl: process.env.PUBLIC_BASE_URL || undefined,
+    supabaseUrl: process.env.SUPABASE_URL || undefined,
+    supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || undefined
   };
 }
