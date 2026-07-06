@@ -10,6 +10,11 @@ export type AppConfig = {
   githubDefaultBaseBranch: string;
   githubAllowedBranchPrefixes: string[];
   githubMaxFileBytes: number;
+  workspaceAgentTriggerId?: string;
+  workspaceAgentToken?: string;
+  workspaceAgentCallbackToken?: string;
+  workspaceAgentApiBaseUrl: string;
+  publicBaseUrl?: string;
 };
 
 function readPort(value: string | undefined): number {
@@ -56,6 +61,12 @@ export function loadConfig(): AppConfig {
       "docs/",
       "ai/"
     ]),
-    githubMaxFileBytes: readPositiveInteger(process.env.GITHUB_MAX_FILE_BYTES, 256_000)
+    githubMaxFileBytes: readPositiveInteger(process.env.GITHUB_MAX_FILE_BYTES, 1_048_576),
+    workspaceAgentTriggerId: process.env.WORKSPACE_AGENT_TRIGGER_ID || undefined,
+    workspaceAgentToken: process.env.WORKSPACE_AGENT_TOKEN || undefined,
+    workspaceAgentCallbackToken: process.env.WORKSPACE_AGENT_CALLBACK_TOKEN || undefined,
+    workspaceAgentApiBaseUrl:
+      process.env.WORKSPACE_AGENT_API_BASE_URL || "https://api.chatgpt.com",
+    publicBaseUrl: process.env.PUBLIC_BASE_URL || undefined
   };
 }
