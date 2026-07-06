@@ -18,8 +18,11 @@ import {
   githubCommentPullRequest,
   githubCreateBranch,
   githubCreatePullRequest,
+  githubDownloadArchiveZip,
+  githubDownloadWorkflowArtifactZip,
   githubGetRepo,
   githubGetWorkflowRuns,
+  githubListWorkflowRunArtifacts,
   githubReadFile,
   githubUpsertFile
 } from "./tools/githubClient.js";
@@ -35,11 +38,25 @@ import { triggerWorkspaceAgent } from "./tools/workspaceAgentClient.js";
 import { handleAgentOpsRestApi } from "./agentops/router.js";
 
 const config = loadConfig();
-const serviceVersion = "0.5.0";
+const serviceVersion = "0.6.0";
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   res.writeHead(statusCode, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
+}
+
+function sendBinary(
+  res: ServerResponse,
+  statusCode: number,
+  body: Buffer,
+  options: { contentType: string; fileName: string }
+): void {
+  res.writeHead(statusCode, {
+    "content-type": options.contentType,
+    "content-length": String(body.byteLength),
+    "content-disposition": `attachment; filename="${options.fileName}"`
+  });
+  res.end(body);
 }
 
 function setCorsHeaders(res: ServerResponse): void {
@@ -49,7 +66,7 @@ function setCorsHeaders(res: ServerResponse): void {
     "Access-Control-Allow-Headers",
     "authorization, content-type, mcp-session-id"
   );
-  res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id");
+  res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, Content-Disposition");
 }
 
 function isMcpAuthorized(req: IncomingMessage): boolean {
@@ -72,6 +89,14 @@ function isWorkspaceAgentCallbackAuthorized(req: IncomingMessage): boolean {
 
 function asNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function parsePositiveInt(value: string | undefined, name: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`Invalid ${name}: ${value}`);
+  }
+  return parsed;
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -167,7 +192,10 @@ function getCapabilities() {
       "/api/github/repos/{owner}/{repo}/branches",
       "/api/github/repos/{owner}/{repo}/pull-requests",
       "/api/github/repos/{owner}/{repo}/pull-requests/{pr_number}/comments",
-      "/api/github/repos/{owner}/{repo}/workflow-runs"
+      "/api/github/repos/{owner}/{repo}/workflow-runs",
+      "/api/github/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
+      "/api/github/repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip",
+      "/api/github/repos/{owner}/{repo}/archive"
     ],
     guardrails: {
       github_allowed_repos: config.githubAllowedRepos,
@@ -375,6 +403,55 @@ async function handleGitHubRestApi(
           ref
         })
       );
+      return true;
+    }
+
+    const archiveMatch = repoRoute(url, "archive");
+
+    if (req.method === "GET" && archiveMatch) {
+      const output = await githubDownloadArchiveZip(config, {
+        ...repoInput(archiveMatch),
+        ref: url.searchParams.get("ref") || undefined
+      });
+      sendBinary(res, 200, output.content, {
+        contentType: output.content_type,
+        fileName: output.file_name
+      });
+      return true;
+    }
+
+    const runArtifactsMatch = url.pathname.match(
+      /^\/api\/github\/repos\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)\/artifacts$/
+    );
+
+    if (req.method === "GET" && runArtifactsMatch) {
+      sendJson(
+        res,
+        200,
+        await githubListWorkflowRunArtifacts(config, {
+          owner: decodeURIComponent(runArtifactsMatch[1] ?? ""),
+          repo: decodeURIComponent(runArtifactsMatch[2] ?? ""),
+          run_id: parsePositiveInt(runArtifactsMatch[3], "run_id"),
+          per_page: asNumber(Number(url.searchParams.get("per_page") || 30), 30)
+        })
+      );
+      return true;
+    }
+
+    const artifactZipMatch = url.pathname.match(
+      /^\/api\/github\/repos\/([^/]+)\/([^/]+)\/actions\/artifacts\/(\d+)\/zip$/
+    );
+
+    if (req.method === "GET" && artifactZipMatch) {
+      const output = await githubDownloadWorkflowArtifactZip(config, {
+        owner: decodeURIComponent(artifactZipMatch[1] ?? ""),
+        repo: decodeURIComponent(artifactZipMatch[2] ?? ""),
+        artifact_id: parsePositiveInt(artifactZipMatch[3], "artifact_id")
+      });
+      sendBinary(res, 200, output.content, {
+        contentType: output.content_type,
+        fileName: output.file_name
+      });
       return true;
     }
 

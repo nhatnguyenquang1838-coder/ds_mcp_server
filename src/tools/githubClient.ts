@@ -38,6 +38,14 @@ export type GitHubPullRequestInput = GitHubRepoRef & {
   draft?: boolean;
 };
 
+export type GitHubBinaryResult = {
+  owner: string;
+  repo: string;
+  file_name: string;
+  content_type: string;
+  content: Buffer;
+};
+
 type GitHubErrorBody = {
   message?: string;
   documentation_url?: string;
@@ -105,6 +113,27 @@ type GitHubWorkflowRunsResponse = {
   }>;
 };
 
+type GitHubArtifactsResponse = {
+  total_count: number;
+  artifacts: Array<{
+    id: number;
+    node_id?: string;
+    name: string;
+    size_in_bytes?: number;
+    url?: string;
+    archive_download_url?: string;
+    expired?: boolean;
+    created_at?: string;
+    updated_at?: string;
+    expires_at?: string;
+    workflow_run?: {
+      id?: number;
+      head_branch?: string;
+      head_sha?: string;
+    };
+  }>;
+};
+
 function requireGitHubToken(config: AppConfig): string {
   if (!config.githubToken) {
     throw new Error("GITHUB_TOKEN is not configured");
@@ -155,6 +184,10 @@ function assertWritableBranch(config: AppConfig, branch: string): void {
   }
 }
 
+function safeFileName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/-+/g, "-");
+}
+
 async function githubFetch<T>(
   config: AppConfig,
   path: string,
@@ -185,6 +218,42 @@ async function githubFetch<T>(
   }
 
   return (await response.json()) as T;
+}
+
+async function githubFetchBinary(
+  config: AppConfig,
+  path: string,
+  fileName: string
+): Promise<{ content: Buffer; content_type: string; file_name: string }> {
+  const token = requireGitHubToken(config);
+  const response = await fetch(`https://api.github.com${path}`, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      Authorization: `Bearer ${token}`,
+      "X-GitHub-Api-Version": "2022-11-28"
+    },
+    redirect: "follow"
+  });
+
+  if (!response.ok) {
+    let message = `GitHub binary download failed: ${response.status}`;
+
+    try {
+      const body = (await response.json()) as GitHubErrorBody;
+      if (body.message) message = `${message} ${body.message}`;
+    } catch {
+      const text = await response.text().catch(() => "");
+      if (text) message = `${message} ${text.slice(0, 200)}`;
+    }
+
+    throw new Error(message);
+  }
+
+  return {
+    content: Buffer.from(await response.arrayBuffer()),
+    content_type: response.headers.get("content-type") || "application/zip",
+    file_name: safeFileName(fileName)
+  };
 }
 
 async function tryGetFileSha(
@@ -374,6 +443,60 @@ export async function githubGetWorkflowRuns(
     config,
     `/repos/${input.owner}/${input.repo}/actions/runs?${params.toString()}`
   );
+}
+
+export async function githubListWorkflowRunArtifacts(
+  config: AppConfig,
+  input: GitHubRepoRef & { run_id: number; per_page?: number }
+) {
+  assertAllowedRepo(config, input.owner, input.repo);
+
+  const params = new URLSearchParams();
+  params.set("per_page", String(Math.min(Math.max(input.per_page ?? 30, 1), 100)));
+
+  return githubFetch<GitHubArtifactsResponse>(
+    config,
+    `/repos/${input.owner}/${input.repo}/actions/runs/${input.run_id}/artifacts?${params.toString()}`
+  );
+}
+
+export async function githubDownloadWorkflowArtifactZip(
+  config: AppConfig,
+  input: GitHubRepoRef & { artifact_id: number }
+): Promise<GitHubBinaryResult> {
+  assertAllowedRepo(config, input.owner, input.repo);
+
+  const result = await githubFetchBinary(
+    config,
+    `/repos/${input.owner}/${input.repo}/actions/artifacts/${input.artifact_id}/zip`,
+    `${input.repo}-artifact-${input.artifact_id}.zip`
+  );
+
+  return {
+    owner: input.owner,
+    repo: input.repo,
+    ...result
+  };
+}
+
+export async function githubDownloadArchiveZip(
+  config: AppConfig,
+  input: GitHubRepoRef & { ref?: string }
+): Promise<GitHubBinaryResult> {
+  assertAllowedRepo(config, input.owner, input.repo);
+
+  const ref = input.ref || config.githubDefaultBaseBranch;
+  const result = await githubFetchBinary(
+    config,
+    `/repos/${input.owner}/${input.repo}/zipball/${encodeURIComponent(ref)}`,
+    `${input.repo}-${safeFileName(ref)}.zip`
+  );
+
+  return {
+    owner: input.owner,
+    repo: input.repo,
+    ...result
+  };
 }
 
 export async function githubCommentPullRequest(
