@@ -7,14 +7,35 @@ import {
   githubCommentPullRequest,
   githubCreateBranch,
   githubCreatePullRequest,
+  githubDownloadArchiveZip,
+  githubDownloadWorkflowArtifactZip,
   githubGetRepo,
   githubGetWorkflowRuns,
+  githubListWorkflowRunArtifacts,
   githubReadFile,
-  githubUpsertFile
+  githubUpsertFile,
+  type GitHubBinaryResult
 } from "./tools/githubClient.js";
 import { writeAuditEvent } from "./tools/auditLog.js";
 
-const serviceVersion = "0.3.0";
+const serviceVersion = "0.4.0";
+
+function binaryOutput(output: GitHubBinaryResult) {
+  const structured = {
+    owner: output.owner,
+    repo: output.repo,
+    file_name: output.file_name,
+    content_type: output.content_type,
+    size_bytes: output.content.byteLength,
+    encoding: "base64",
+    content_base64: output.content.toString("base64")
+  };
+
+  return {
+    structuredContent: structured,
+    content: [{ type: "text" as const, text: JSON.stringify(structured) }]
+  };
+}
 
 export function createMcpServer(config: AppConfig): McpServer {
   const server = new McpServer({
@@ -300,6 +321,60 @@ export function createMcpServer(config: AppConfig): McpServer {
         content: [{ type: "text", text: JSON.stringify(output) }]
       };
     }
+  );
+
+  server.registerTool(
+    "github_list_workflow_run_artifacts",
+    {
+      title: "List GitHub Actions workflow run artifacts",
+      description: "List artifacts for a specific GitHub Actions workflow run in an allowlisted repository.",
+      inputSchema: {
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        run_id: z.number().int().positive(),
+        per_page: z.number().int().min(1).max(100).optional()
+      },
+      annotations: { readOnlyHint: true }
+    },
+    async (input) => {
+      const output = await githubListWorkflowRunArtifacts(config, input);
+      return {
+        structuredContent: output,
+        content: [{ type: "text", text: JSON.stringify(output) }]
+      };
+    }
+  );
+
+  server.registerTool(
+    "github_download_workflow_artifact_zip",
+    {
+      title: "Download GitHub Actions artifact ZIP",
+      description:
+        "Download a GitHub Actions artifact ZIP from an allowlisted repository. Returns base64 content; prefer REST download endpoint for large artifacts.",
+      inputSchema: {
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        artifact_id: z.number().int().positive()
+      },
+      annotations: { readOnlyHint: true }
+    },
+    async (input) => binaryOutput(await githubDownloadWorkflowArtifactZip(config, input))
+  );
+
+  server.registerTool(
+    "github_download_repo_archive_zip",
+    {
+      title: "Download GitHub repository archive ZIP",
+      description:
+        "Download a repository archive ZIP for a branch, tag, or commit ref. Returns base64 content; prefer REST download endpoint for large archives.",
+      inputSchema: {
+        owner: z.string().min(1),
+        repo: z.string().min(1),
+        ref: z.string().optional()
+      },
+      annotations: { readOnlyHint: true }
+    },
+    async (input) => binaryOutput(await githubDownloadArchiveZip(config, input))
   );
 
   server.registerTool(
