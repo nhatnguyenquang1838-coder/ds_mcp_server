@@ -16,9 +16,10 @@ import {
   githubUpsertFile,
   type GitHubBinaryResult
 } from "./tools/githubClient.js";
+import { registerGitHubFilePushTools } from "./tools/githubFilePushTools.js";
 import { writeAuditEvent } from "./tools/auditLog.js";
 
-const serviceVersion = "0.4.0";
+const serviceVersion = "0.5.0";
 
 function binaryOutput(output: GitHubBinaryResult) {
   const structured = {
@@ -266,6 +267,8 @@ export function createMcpServer(config: AppConfig): McpServer {
       };
     }
   );
+
+  registerGitHubFilePushTools(server, config);
 
   server.registerTool(
     "github_create_pr",
