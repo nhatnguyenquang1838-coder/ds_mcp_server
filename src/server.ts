@@ -8,7 +8,9 @@ import {
   githubCommentPullRequestSchema,
   githubCreateBranchSchema,
   githubCreatePullRequestSchema,
-  githubUpsertFileSchema
+  githubUpsertFileSchema,
+  workspaceAgentRunResultSchema,
+  workspaceAgentRunTriggerSchema
 } from "./schemas.js";
 import { forwardAgentResultToBackend } from "./tools/backendClient.js";
 import { getDesignRequest, submitAgentResult } from "./tools/designSystemStore.js";
@@ -22,9 +24,18 @@ import {
   githubUpsertFile
 } from "./tools/githubClient.js";
 import { writeAuditEvent } from "./tools/auditLog.js";
+import {
+  completeAgentRun,
+  createAgentRun,
+  getAgentRun,
+  markAgentRunFailed,
+  markAgentRunTriggered,
+  markAgentRunTriggering
+} from "./tools/agentRunStore.js";
+import { triggerWorkspaceAgent } from "./tools/workspaceAgentClient.js";
 
 const config = loadConfig();
-const serviceVersion = "0.3.0";
+const serviceVersion = "0.4.0";
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
   res.writeHead(statusCode, { "content-type": "application/json" });
@@ -51,6 +62,12 @@ function isRestAuthorized(req: IncomingMessage): boolean {
   if (!config.restApiBearerToken) return true;
   const authHeader = req.headers.authorization;
   return authHeader === `Bearer ${config.restApiBearerToken}`;
+}
+
+function isWorkspaceAgentCallbackAuthorized(req: IncomingMessage): boolean {
+  if (!config.workspaceAgentCallbackToken) return false;
+  const authHeader = req.headers.authorization;
+  return authHeader === `Bearer ${config.workspaceAgentCallbackToken}`;
 }
 
 function asNumber(value: unknown, fallback: number): number {
@@ -85,6 +102,36 @@ function repoInput(match: RegExpMatchArray): { owner: string; repo: string } {
   };
 }
 
+function firstHeader(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function requestBaseUrl(req: IncomingMessage): string {
+  if (config.publicBaseUrl) return config.publicBaseUrl.replace(/\/$/, "");
+
+  const proto = firstHeader(req.headers["x-forwarded-proto"]) || "https";
+  const host = firstHeader(req.headers["x-forwarded-host"]) || req.headers.host || "localhost";
+  return `${proto}://${host}`.replace(/\/$/, "");
+}
+
+function agentRunPublicView(run: ReturnType<typeof getAgentRun>) {
+  if (!run) return undefined;
+  return {
+    id: run.id,
+    agent_type: run.agent_type,
+    request_id: run.request_id,
+    mode: run.mode,
+    conversation_key: run.conversation_key,
+    status: run.status,
+    trigger_status_code: run.trigger_status_code,
+    trigger_error: run.trigger_error,
+    result_json: run.result_json,
+    created_at: run.created_at,
+    triggered_at: run.triggered_at,
+    completed_at: run.completed_at
+  };
+}
+
 function getCapabilities() {
   return {
     ok: true,
@@ -105,6 +152,9 @@ function getCapabilities() {
     ],
     rest_paths: [
       "/api/capabilities",
+      "/api/agent-runs",
+      "/api/agent-runs/{run_id}",
+      "/internal/agent-runs/{run_id}/result",
       "/api/design-requests/{request_id}",
       "/api/agent-results",
       "/api/github/repos/{owner}/{repo}",
@@ -124,9 +174,162 @@ function getCapabilities() {
     auth: {
       mcp_bearer_token_configured: Boolean(config.mcpBearerToken),
       rest_api_bearer_token_configured: Boolean(config.restApiBearerToken),
-      github_token_configured: Boolean(config.githubToken)
+      github_token_configured: Boolean(config.githubToken),
+      workspace_agent_trigger_configured: Boolean(
+        config.workspaceAgentTriggerId && config.workspaceAgentToken
+      ),
+      workspace_agent_callback_token_configured: Boolean(config.workspaceAgentCallbackToken)
     }
   };
+}
+
+async function handleWorkspaceAgentCallback(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL
+): Promise<boolean> {
+  const callbackMatch = url.pathname.match(/^\/internal\/agent-runs\/([^/]+)\/result$/);
+  if (!callbackMatch) return false;
+
+  setCorsHeaders(res);
+
+  if (req.method === "OPTIONS") {
+    res.writeHead(204);
+    res.end();
+    return true;
+  }
+
+  if (req.method !== "POST") {
+    sendJson(res, 405, { error: "Method not allowed" });
+    return true;
+  }
+
+  if (!config.workspaceAgentCallbackToken) {
+    sendJson(res, 500, { error: "WORKSPACE_AGENT_CALLBACK_TOKEN is not configured" });
+    return true;
+  }
+
+  if (!isWorkspaceAgentCallbackAuthorized(req)) {
+    sendJson(res, 401, { error: "Unauthorized" });
+    return true;
+  }
+
+  try {
+    const runId = decodeURIComponent(callbackMatch[1] ?? "");
+    const body = workspaceAgentRunResultSchema.parse(await readJsonBody(req));
+    const run = completeAgentRun(runId, body);
+
+    if (!run) {
+      sendJson(res, 404, { error: "Agent run not found" });
+      return true;
+    }
+
+    writeAuditEvent({
+      action: "workspace_agent_callback",
+      source: "workspace-agent",
+      request_id: run.request_id,
+      run_id: run.id,
+      status: body.status === "failed" ? "failure" : "success",
+      message: body.error
+    });
+
+    sendJson(res, 200, {
+      ok: true,
+      run_id: run.id,
+      status: run.status
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      sendJson(res, 400, { error: "Invalid JSON body" });
+      return true;
+    }
+
+    if (error instanceof ZodError) {
+      sendJson(res, 400, {
+        error: "Invalid workspace agent callback payload",
+        details: error.flatten()
+      });
+      return true;
+    }
+
+    sendJson(res, 500, { error: "Internal server error" });
+    return true;
+  }
+}
+
+async function handleWorkspaceAgentRestApi(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL
+): Promise<boolean> {
+  const runMatch = url.pathname.match(/^\/api\/agent-runs\/([^/]+)$/);
+
+  if (req.method === "GET" && runMatch) {
+    setCorsHeaders(res);
+    const run = agentRunPublicView(getAgentRun(decodeURIComponent(runMatch[1] ?? "")));
+    if (!run) {
+      sendJson(res, 404, { error: "Agent run not found" });
+      return true;
+    }
+    sendJson(res, 200, run);
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/agent-runs") {
+    setCorsHeaders(res);
+
+    try {
+      const body = workspaceAgentRunTriggerSchema.parse(await readJsonBody(req));
+      const run = createAgentRun(body);
+      markAgentRunTriggering(run.id);
+
+      const callbackUrl = `${requestBaseUrl(req)}/internal/agent-runs/${encodeURIComponent(run.id)}/result`;
+      const triggerResult = await triggerWorkspaceAgent(config, run, callbackUrl);
+      const triggeredRun = markAgentRunTriggered(run.id, triggerResult.status_code) ?? run;
+
+      writeAuditEvent({
+        action: "workspace_agent_trigger",
+        source: "rest",
+        request_id: run.request_id,
+        run_id: run.id,
+        status: "success"
+      });
+
+      sendJson(res, 202, {
+        ok: true,
+        run: agentRunPublicView(triggeredRun),
+        trigger: triggerResult
+      });
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Workspace agent trigger failed";
+      writeAuditEvent({
+        action: "workspace_agent_trigger",
+        source: "rest",
+        status: "failure",
+        message
+      });
+
+      if (error instanceof SyntaxError) {
+        sendJson(res, 400, { error: "Invalid JSON body" });
+        return true;
+      }
+
+      if (error instanceof ZodError) {
+        sendJson(res, 400, {
+          error: "Invalid workspace agent trigger payload",
+          details: error.flatten()
+        });
+        return true;
+      }
+
+      sendJson(res, message.includes("not configured") ? 500 : 502, { error: message });
+      return true;
+    }
+  }
+
+  return false;
 }
 
 async function handleGitHubRestApi(
@@ -319,6 +522,9 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
     return true;
   }
 
+  const handledWorkspaceAgentApi = await handleWorkspaceAgentRestApi(req, res, url);
+  if (handledWorkspaceAgentApi) return true;
+
   const handledGitHubApi = await handleGitHubRestApi(req, res, url);
   if (handledGitHubApi) return true;
 
@@ -396,6 +602,9 @@ const httpServer = createServer(async (req, res) => {
   if (req.method === "GET" && url.pathname === "/health") {
     return sendJson(res, 200, { ok: true });
   }
+
+  const handledWorkspaceAgentCallback = await handleWorkspaceAgentCallback(req, res, url);
+  if (handledWorkspaceAgentCallback) return;
 
   const handledRestApi = await handleRestApi(req, res, url);
   if (handledRestApi) return;
