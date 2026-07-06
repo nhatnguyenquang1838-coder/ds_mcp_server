@@ -1,6 +1,6 @@
 # Design System MCP Server
 
-Self-hosted MCP server for connecting ChatGPT / Workspace Agents to a Design System backend.
+Self-hosted MCP server for connecting ChatGPT / Workspace Agents to a Design System backend and guarded GitHub workflows.
 
 ## What this provides
 
@@ -11,13 +11,25 @@ This server supports two integration modes:
 | MCP native connector | `/mcp` | ChatGPT Apps & Connectors / MCP connector |
 | REST wrapper | `/api/...` | Custom GPT Actions using OpenAPI YAML |
 
-Initial MCP tools:
+Design System MCP tools:
 
 | Tool | Type | Purpose |
 |---|---|---|
 | `ds_ping` | read | Health check from ChatGPT |
 | `ds_get_request` | read | Fetch design request context by `request_id` |
 | `ds_submit_agent_result` | write | Submit a completed agent review result back to the system |
+
+GitHub MCP tools:
+
+| Tool | Type | Purpose |
+|---|---|---|
+| `github_get_repo` | read | Read allowlisted repo metadata |
+| `github_read_file` | read | Read UTF-8 file content |
+| `github_create_branch` | write | Create guarded branch from base branch |
+| `github_upsert_file` | write | Create/update file on guarded non-main branch |
+| `github_create_pr` | write | Create pull request |
+| `github_get_workflow_runs` | read | Read recent GitHub Actions workflow runs |
+| `github_comment_pr` | write | Comment on pull request |
 
 REST endpoints for GPT Actions:
 
@@ -26,15 +38,23 @@ REST endpoints for GPT Actions:
 | `GET` | `/health` | Health check |
 | `GET` | `/api/design-requests/{request_id}` | Fetch design request by ID |
 | `POST` | `/api/agent-results` | Submit final agent review result |
+| `GET` | `/api/github/repos/{owner}/{repo}` | Read repo metadata |
+| `GET` | `/api/github/repos/{owner}/{repo}/files?path=...&ref=...` | Read file |
+| `POST` | `/api/github/repos/{owner}/{repo}/branches` | Create branch |
+| `POST` | `/api/github/repos/{owner}/{repo}/files` | Create/update file |
+| `POST` | `/api/github/repos/{owner}/{repo}/pull-requests` | Create PR |
+| `POST` | `/api/github/repos/{owner}/{repo}/pull-requests/{pr_number}/comments` | Comment PR |
+| `GET` | `/api/github/repos/{owner}/{repo}/workflow-runs` | Read workflow runs |
 
 This repo is intentionally small. It is the public-MCP and REST-action foundation for a larger workflow:
 
 ```text
-Design System Backend
-  -> triggers ChatGPT Workspace Agent or Custom GPT
-  -> Agent reads request context through MCP or REST Actions
-  -> Agent submits result through ds_submit_agent_result or POST /api/agent-results
-  -> Backend stores result and updates UI
+Design System Backend / Custom GPT / ChatGPT
+  -> reads design request or GitHub repo context
+  -> creates guarded branch
+  -> updates files on branch
+  -> opens PR
+  -> submits design review result or PR comment
 ```
 
 ## Requirements
@@ -42,6 +62,7 @@ Design System Backend
 - Node.js 20+
 - npm
 - Public HTTPS URL for ChatGPT connector usage
+- GitHub fine-grained PAT or GitHub App token for GitHub gateway usage
 
 ## Local setup
 
@@ -89,6 +110,78 @@ curl -X POST http://localhost:8787/api/agent-results \
       }
     ],
     "validation": ["Run typecheck", "Test 360px viewport"]
+  }'
+```
+
+## GitHub gateway setup
+
+Set these env vars before using GitHub tools:
+
+```env
+GITHUB_TOKEN=github_pat_xxx
+GITHUB_ALLOWED_REPOS=nhatnguyenquang1838-coder/ds_mcp_server,nhatnguyenquang1838-coder/rental_home
+GITHUB_DEFAULT_BASE_BRANCH=main
+GITHUB_ALLOWED_BRANCH_PREFIXES=feature/,fix/,chore/,docs/,ai/
+```
+
+Recommended fine-grained PAT permissions for MVP:
+
+```text
+Repository access: only selected repositories
+Contents: Read and write
+Pull requests: Read and write
+Actions: Read-only
+Metadata: Read-only
+```
+
+Guardrails:
+
+```text
+- Repository must be in GITHUB_ALLOWED_REPOS.
+- Direct writes to main/master/production/prod are blocked.
+- Write branches must start with feature/, fix/, chore/, docs/, or ai/ by default.
+- File paths cannot start with /, contain .., or use Windows backslash.
+- No merge/delete/force-push/secret-management endpoints are exposed.
+```
+
+GitHub REST read file test:
+
+```bash
+curl "http://localhost:8787/api/github/repos/nhatnguyenquang1838-coder/ds_mcp_server/files?path=README.md"
+```
+
+Create branch test:
+
+```bash
+curl -X POST http://localhost:8787/api/github/repos/nhatnguyenquang1838-coder/ds_mcp_server/branches \
+  -H "Content-Type: application/json" \
+  -d '{"branch":"docs/test-github-gateway","from_branch":"main"}'
+```
+
+Create/update file test:
+
+```bash
+curl -X POST http://localhost:8787/api/github/repos/nhatnguyenquang1838-coder/ds_mcp_server/files \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path":"docs/test-github-gateway.md",
+    "content":"# Test GitHub Gateway\n",
+    "branch":"docs/test-github-gateway",
+    "message":"docs: test github gateway"
+  }'
+```
+
+Create PR test:
+
+```bash
+curl -X POST http://localhost:8787/api/github/repos/nhatnguyenquang1838-coder/ds_mcp_server/pull-requests \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title":"docs: test github gateway",
+    "head":"docs/test-github-gateway",
+    "base":"main",
+    "body":"## Summary\n- Test GitHub gateway\n\n## Validation\n- Manual API call",
+    "draft":true
   }'
 ```
 
@@ -143,13 +236,6 @@ Use server URL:
 
 ```text
 https://<your-public-domain>
-```
-
-Available action paths:
-
-```text
-GET  /api/design-requests/{request_id}
-POST /api/agent-results
 ```
 
 ## Optional bearer auth
@@ -207,6 +293,7 @@ Minimum controls before production:
 - Do not put secrets in tool output.
 - Audit all write calls.
 - Validate agent result JSON again in the backend.
+- Prefer GitHub App auth over PAT for multi-user/team production.
 
 ## Docker
 
