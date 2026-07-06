@@ -1,6 +1,6 @@
 # GitHub binary-safe downloads
 
-This change adds fallback REST endpoints for GitHub artifacts and repo archive downloads.
+This change adds fallback REST endpoints and MCP tools for GitHub artifacts and repo archive downloads.
 
 ## Required GitHub token permissions
 
@@ -12,7 +12,7 @@ Actions: Read-only
 Metadata: Read-only
 ```
 
-## New endpoints
+## REST endpoints
 
 ### List workflow run artifacts
 
@@ -54,9 +54,64 @@ Example:
 curl -L -o repo-main.zip "https://ds-mcp-server-theta.vercel.app/api/github/repos/nhatnguyenquang1838-coder/ds_mcp_server/archive?ref=main"
 ```
 
+## MCP tools
+
+### `github_list_workflow_run_artifacts`
+
+Input:
+
+```json
+{
+  "owner": "nhatnguyenquang1838-coder",
+  "repo": "ds_mcp_server",
+  "run_id": 123456,
+  "per_page": 30
+}
+```
+
+Returns GitHub Actions artifact metadata as JSON.
+
+### `github_download_workflow_artifact_zip`
+
+Input:
+
+```json
+{
+  "owner": "nhatnguyenquang1838-coder",
+  "repo": "ds_mcp_server",
+  "artifact_id": 987654
+}
+```
+
+Returns:
+
+```json
+{
+  "file_name": "ds_mcp_server-artifact-987654.zip",
+  "content_type": "application/zip",
+  "size_bytes": 12345,
+  "encoding": "base64",
+  "content_base64": "..."
+}
+```
+
+### `github_download_repo_archive_zip`
+
+Input:
+
+```json
+{
+  "owner": "nhatnguyenquang1838-coder",
+  "repo": "ds_mcp_server",
+  "ref": "main"
+}
+```
+
+Returns ZIP content as base64 metadata. For large archives, prefer the REST endpoint because MCP responses can become too large.
+
 ## Notes
 
-- These endpoints are binary-safe and do not try to decode ZIP files as UTF-8.
+- These paths are binary-safe and do not try to decode ZIP files as UTF-8.
 - Repo allowlist rules still apply through `GITHUB_ALLOWED_REPOS`.
-- If `REST_API_BEARER_TOKEN` is configured, callers must pass `Authorization: Bearer <token>`.
-- Very large artifacts or archives may still hit hosting/runtime response-size limits.
+- If `REST_API_BEARER_TOKEN` is configured, REST callers must pass `Authorization: Bearer <token>`.
+- Very large artifacts or archives may still hit hosting/runtime/MCP payload limits.
