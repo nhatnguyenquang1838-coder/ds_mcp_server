@@ -70,6 +70,7 @@ export type TaskRecord = {
   repo_branch?: string | null;
   pr_number?: number | null;
   pr_url?: string | null;
+  idempotency_key?: string | null;
   created_at: string;
   updated_at: string;
   completed_at?: string | null;
@@ -106,6 +107,7 @@ export type TaskEventRecord = {
   to_state?: TaskState | null;
   actor: "user" | "agent" | "system";
   actor_id?: string | null;
+  idempotency_key?: string | null;
   payload?: Record<string, unknown> | null;
   created_at: string;
 };
