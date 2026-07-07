@@ -1,3 +1,11 @@
+export type RuntimeMode = "local" | "development" | "staging" | "production";
+
+export type DatabaseProfile = {
+  target: string;
+  supabaseUrl?: string;
+  supabaseServiceRoleKey?: string;
+};
+
 export type AppConfig = {
   port: number;
   mcpPath: string;
@@ -17,6 +25,11 @@ export type AppConfig = {
   publicBaseUrl?: string;
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
+  runtimeMode: RuntimeMode;
+  activeDbTarget: string;
+  devToolsEnabled: boolean;
+  devToolsAllowRealDbSwitch: boolean;
+  databaseProfiles: Record<string, DatabaseProfile>;
 };
 
 function readPort(value: string | undefined): number {
@@ -45,7 +58,76 @@ function readCsv(value: string | undefined, fallback: string[] = []): string[] {
     .filter(Boolean);
 }
 
+function readBoolean(value: string | undefined, fallback = false): boolean {
+  if (!value) return fallback;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+function readRuntimeMode(value: string | undefined): RuntimeMode {
+  const fallback: RuntimeMode = process.env.NODE_ENV === "production" ? "production" : "local";
+  if (!value) return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (["local", "development", "staging", "production"].includes(normalized)) {
+    return normalized as RuntimeMode;
+  }
+  throw new Error(`Invalid APP_RUNTIME_MODE: ${value}`);
+}
+
+function databaseProfile(
+  target: string,
+  supabaseUrl: string | undefined,
+  supabaseServiceRoleKey: string | undefined
+): DatabaseProfile {
+  return {
+    target,
+    supabaseUrl: supabaseUrl || undefined,
+    supabaseServiceRoleKey: supabaseServiceRoleKey || undefined
+  };
+}
+
+function createDatabaseProfiles(): Record<string, DatabaseProfile> {
+  return {
+    default: databaseProfile("default", process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY),
+    real: databaseProfile(
+      "real",
+      process.env.SUPABASE_REAL_URL || process.env.SUPABASE_URL,
+      process.env.SUPABASE_REAL_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY
+    ),
+    local: databaseProfile(
+      "local",
+      process.env.SUPABASE_LOCAL_URL,
+      process.env.SUPABASE_LOCAL_SERVICE_ROLE_KEY
+    ),
+    development: databaseProfile(
+      "development",
+      process.env.SUPABASE_DEVELOPMENT_URL,
+      process.env.SUPABASE_DEVELOPMENT_SERVICE_ROLE_KEY
+    ),
+    staging: databaseProfile(
+      "staging",
+      process.env.SUPABASE_STAGING_URL,
+      process.env.SUPABASE_STAGING_SERVICE_ROLE_KEY
+    ),
+    production: databaseProfile(
+      "production",
+      process.env.SUPABASE_PRODUCTION_URL,
+      process.env.SUPABASE_PRODUCTION_SERVICE_ROLE_KEY
+    )
+  };
+}
+
+function activeDatabaseProfile(
+  profiles: Record<string, DatabaseProfile>,
+  activeDbTarget: string
+): DatabaseProfile {
+  return profiles[activeDbTarget] ?? profiles.default ?? databaseProfile("default", undefined, undefined);
+}
+
 export function loadConfig(): AppConfig {
+  const databaseProfiles = createDatabaseProfiles();
+  const activeDbTarget = process.env.SUPABASE_ACTIVE_DB_TARGET || process.env.DB_TARGET || "default";
+  const activeProfile = activeDatabaseProfile(databaseProfiles, activeDbTarget);
+
   return {
     port: readPort(process.env.PORT),
     mcpPath: process.env.MCP_PATH || "/mcp",
@@ -70,7 +152,12 @@ export function loadConfig(): AppConfig {
     workspaceAgentApiBaseUrl:
       process.env.WORKSPACE_AGENT_API_BASE_URL || "https://api.chatgpt.com",
     publicBaseUrl: process.env.PUBLIC_BASE_URL || undefined,
-    supabaseUrl: process.env.SUPABASE_URL || undefined,
-    supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || undefined
+    supabaseUrl: activeProfile.supabaseUrl,
+    supabaseServiceRoleKey: activeProfile.supabaseServiceRoleKey,
+    runtimeMode: readRuntimeMode(process.env.APP_RUNTIME_MODE),
+    activeDbTarget,
+    devToolsEnabled: readBoolean(process.env.DEV_TOOLS_ENABLED),
+    devToolsAllowRealDbSwitch: readBoolean(process.env.DEV_TOOLS_ALLOW_REAL_DB_SWITCH),
+    databaseProfiles
   };
 }

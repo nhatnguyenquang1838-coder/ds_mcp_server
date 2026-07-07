@@ -34,6 +34,7 @@ import {
 import { getOrchestrationDashboardSnapshot } from "../dashboard/orchestrationDashboard.js";
 import { listAgents, recordAgentHeartbeat, registerAgent } from "../agents/agentRegistry.js";
 import { runSchedulerTick } from "../scheduler/orchestrationScheduler.js";
+import { getEnvironmentStatus, switchRuntimeEnvironment } from "../devtools/environment.js";
 
 export type AgentOpsRouterDeps = {
   config: AppConfig;
@@ -62,6 +63,13 @@ const schedulerTickSchema = z.object({
   scheduler_id: z.string().min(1).default("default")
 });
 
+const environmentSwitchSchema = z.object({
+  runtime_mode: z.enum(["local", "development", "staging", "production"]).optional(),
+  db_target: z.string().min(1).optional()
+}).refine((input) => Boolean(input.runtime_mode || input.db_target), {
+  message: "runtime_mode or db_target is required"
+});
+
 function decodePathValue(value: string | undefined): string {
   return decodeURIComponent(value ?? "");
 }
@@ -80,6 +88,7 @@ function isAgentOpsPath(pathname: string): boolean {
     pathname.startsWith("/api/dashboard") ||
     pathname.startsWith("/api/agents") ||
     pathname.startsWith("/api/scheduler") ||
+    pathname.startsWith("/api/dev") ||
     pathname === "/api/webhooks/github";
 }
 
@@ -109,6 +118,17 @@ export async function handleAgentOpsRestApi(
   setCorsHeaders(res);
 
   try {
+    if (req.method === "GET" && url.pathname === "/api/dev/environment") {
+      sendJson(res, 200, getEnvironmentStatus(config));
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/dev/environment") {
+      const body = environmentSwitchSchema.parse(await readJsonBody(req));
+      sendJson(res, 200, switchRuntimeEnvironment(config, body));
+      return true;
+    }
+
     if (req.method === "GET" && url.pathname.startsWith("/api/dashboard/")) {
       const limit = Number(url.searchParams.get("limit") || 50);
       const snapshot = await getOrchestrationDashboardSnapshot(config, Number.isFinite(limit) ? limit : 50);
