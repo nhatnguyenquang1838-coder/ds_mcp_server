@@ -3,7 +3,7 @@
 ## Execution checklist
 
 - [x] Task 1: Add design and implementation checklist.
-- [ ] Task 2: Add task/workflow schemas.
+- [!] Task 2: Add task/workflow schemas. Blocked by connector write guard when creating src files.
 - [ ] Task 3: Add in-memory task store and state engine MVP.
 - [ ] Task 4: Add REST task APIs.
 - [ ] Task 5: Add GitHub webhook ingestion.
