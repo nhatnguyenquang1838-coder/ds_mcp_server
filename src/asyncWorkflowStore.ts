@@ -1,4 +1,18 @@
 import { randomUUID } from "node:crypto";
+import type { AppConfig } from "./config.js";
+import { isSupabaseConfigured } from "./db/supabaseClient.js";
+import {
+  appendTaskEvent as appendPersistentTaskEvent,
+  claimNextTaskRecord,
+  createTaskRecord,
+  createWorkflowRecord,
+  findWaitingGithubTasks,
+  getWorkflowRecord,
+  markWebhookDeliveryProcessed,
+  recordWebhookDelivery,
+  updateTaskResultRecord,
+  updateWorkflowStatus
+} from "./repositories/orchestrationRepository.js";
 
 export type AsyncWorkflowStatus = "running" | "waiting" | "succeeded" | "failed" | "cancelled";
 export type AsyncTaskStatus = "queued" | "leased" | "running" | "waiting_external" | "succeeded" | "failed" | "cancelled" | "dead_letter";
@@ -56,13 +70,13 @@ function createId(prefix: string): string {
   return `${prefix}_${randomUUID()}`;
 }
 
-function appendEvent(event: Omit<AsyncTaskEvent, "id" | "created_at">): AsyncTaskEvent {
+function appendMemoryEvent(event: Omit<AsyncTaskEvent, "id" | "created_at">): AsyncTaskEvent {
   const record = { id: createId("aevt"), created_at: now(), ...event };
   events.push(record);
   return record;
 }
 
-function setWorkflowCurrentTask(workflowId: string, taskId: string | undefined): void {
+function setMemoryWorkflowCurrentTask(workflowId: string, taskId: string | undefined): void {
   const workflow = workflows.get(workflowId);
   if (!workflow) return;
   workflow.current_task_id = taskId;
@@ -70,7 +84,7 @@ function setWorkflowCurrentTask(workflowId: string, taskId: string | undefined):
   workflows.set(workflowId, workflow);
 }
 
-function createTask(input: {
+function createMemoryTask(input: {
   workflow_id: string;
   parent_task_id?: string;
   type: AsyncTaskType;
@@ -93,8 +107,14 @@ function createTask(input: {
     updated_at: timestamp
   };
   tasks.set(task.id, task);
-  setWorkflowCurrentTask(task.workflow_id, task.id);
-  appendEvent({ workflow_id: task.workflow_id, task_id: task.id, event_type: "task_created", actor: "state_engine", data_json: { type: task.type, status: task.status } });
+  setMemoryWorkflowCurrentTask(task.workflow_id, task.id);
+  appendMemoryEvent({
+    workflow_id: task.workflow_id,
+    task_id: task.id,
+    event_type: "task_created",
+    actor: "state_engine",
+    data_json: { type: task.type, status: task.status }
+  });
   return task;
 }
 
@@ -109,29 +129,50 @@ function nextTaskType(task: AsyncTask, result: Record<string, unknown>): AsyncTa
   return undefined;
 }
 
-export function createAsyncWorkflow(input: {
+export async function createAsyncWorkflow(config: AppConfig, input: {
   name: string;
   source?: "web" | "chatgpt" | "system";
   input?: Record<string, unknown>;
   first_task_type?: AsyncTaskType;
-}): { workflow: AsyncWorkflow; task: AsyncTask } {
+}): Promise<{ workflow: AsyncWorkflow; task: AsyncTask }> {
+  const source = input.source ?? "web";
+  const context = input.input ?? {};
+
+  if (isSupabaseConfigured(config)) {
+    const workflow = await createWorkflowRecord(config, {
+      name: input.name,
+      source,
+      context_json: context
+    });
+    const task = await createTaskRecord(config, {
+      workflow_id: workflow.id,
+      type: input.first_task_type ?? "analyze_repo",
+      payload_json: context
+    });
+    return { workflow: { ...workflow, current_task_id: task.id }, task };
+  }
+
   const timestamp = now();
   const workflow: AsyncWorkflow = {
     id: createId("awf"),
     name: input.name,
-    source: input.source ?? "web",
+    source,
     status: "running",
-    context_json: input.input ?? {},
+    context_json: context,
     created_at: timestamp,
     updated_at: timestamp
   };
   workflows.set(workflow.id, workflow);
-  appendEvent({ workflow_id: workflow.id, event_type: "workflow_created", actor: workflow.source, data_json: workflow.context_json });
-  const task = createTask({ workflow_id: workflow.id, type: input.first_task_type ?? "analyze_repo", payload_json: workflow.context_json });
+  appendMemoryEvent({ workflow_id: workflow.id, event_type: "workflow_created", actor: workflow.source, data_json: workflow.context_json });
+  const task = createMemoryTask({ workflow_id: workflow.id, type: input.first_task_type ?? "analyze_repo", payload_json: workflow.context_json });
   return { workflow: workflows.get(workflow.id) ?? workflow, task };
 }
 
-export function getAsyncWorkflow(id: string): { workflow: AsyncWorkflow; tasks: AsyncTask[]; events: AsyncTaskEvent[] } | undefined {
+export async function getAsyncWorkflow(config: AppConfig, id: string): Promise<{ workflow: AsyncWorkflow; tasks: AsyncTask[]; events: AsyncTaskEvent[] } | undefined> {
+  if (isSupabaseConfigured(config)) {
+    return getWorkflowRecord(config, id);
+  }
+
   const workflow = workflows.get(id);
   if (!workflow) return undefined;
   return {
@@ -141,7 +182,11 @@ export function getAsyncWorkflow(id: string): { workflow: AsyncWorkflow; tasks: 
   };
 }
 
-export function claimAsyncTask(input: { agent_id: string; capabilities: AsyncTaskType[]; lease_seconds?: number }): AsyncTask | undefined {
+export async function claimAsyncTask(config: AppConfig, input: { agent_id: string; capabilities: AsyncTaskType[]; lease_seconds?: number }): Promise<AsyncTask | undefined> {
+  if (isSupabaseConfigured(config)) {
+    return claimNextTaskRecord(config, input);
+  }
+
   const nowMs = Date.now();
   const task = [...tasks.values()].find((candidate) => {
     if (!input.capabilities.includes(candidate.type)) return false;
@@ -155,11 +200,55 @@ export function claimAsyncTask(input: { agent_id: string; capabilities: AsyncTas
   task.lease_expires_at = new Date(nowMs + (input.lease_seconds ?? 120) * 1000).toISOString();
   task.updated_at = now();
   tasks.set(task.id, task);
-  appendEvent({ workflow_id: task.workflow_id, task_id: task.id, event_type: "task_claimed", actor: "agent", data_json: { agent_id: input.agent_id } });
+  appendMemoryEvent({ workflow_id: task.workflow_id, task_id: task.id, event_type: "task_claimed", actor: "agent", data_json: { agent_id: input.agent_id } });
   return task;
 }
 
-export function submitAsyncTaskResult(taskId: string, input: { status: "succeeded" | "failed"; summary?: string; artifacts?: Record<string, unknown>; error?: Record<string, unknown> }): { task: AsyncTask; next_task?: AsyncTask } | undefined {
+export async function submitAsyncTaskResult(
+  config: AppConfig,
+  taskId: string,
+  input: { status: "succeeded" | "failed"; summary?: string; artifacts?: Record<string, unknown>; error?: Record<string, unknown> }
+): Promise<{ task: AsyncTask; next_task?: AsyncTask } | undefined> {
+  if (isSupabaseConfigured(config)) {
+    const task = await updateTaskResultRecord(config, taskId, input);
+    if (!task) return undefined;
+
+    if (input.status === "failed") {
+      await updateWorkflowStatus(config, task.workflow_id, "failed", task.id);
+      return { task };
+    }
+
+    if (task.type === "final_report") {
+      await updateWorkflowStatus(config, task.workflow_id, "succeeded", undefined);
+      await appendPersistentTaskEvent(config, {
+        workflow_id: task.workflow_id,
+        task_id: task.id,
+        event_type: "workflow_succeeded",
+        actor: "state_engine",
+        data_json: {}
+      });
+      return { task };
+    }
+
+    const next = nextTaskType(task, task.result_json ?? {});
+    if (!next) return { task };
+
+    const nextTask = await createTaskRecord(config, {
+      workflow_id: task.workflow_id,
+      parent_task_id: task.id,
+      type: next,
+      status: next === "wait_github_ci" ? "waiting_external" : "queued",
+      payload_json: task.result_json ?? {},
+      wait_key: String(task.result_json?.head_sha ?? task.result_json?.pr_number ?? "") || undefined
+    });
+
+    if (next === "wait_github_ci") {
+      await updateWorkflowStatus(config, task.workflow_id, "waiting", nextTask.id);
+    }
+
+    return { task, next_task: nextTask };
+  }
+
   const task = tasks.get(taskId);
   if (!task) return undefined;
   task.status = input.status;
@@ -167,7 +256,7 @@ export function submitAsyncTaskResult(taskId: string, input: { status: "succeede
   task.error_json = input.error;
   task.updated_at = now();
   tasks.set(task.id, task);
-  appendEvent({ workflow_id: task.workflow_id, task_id: task.id, event_type: "task_result_submitted", actor: "agent", data_json: input });
+  appendMemoryEvent({ workflow_id: task.workflow_id, task_id: task.id, event_type: "task_result_submitted", actor: "agent", data_json: input });
 
   if (input.status === "failed") {
     const workflow = workflows.get(task.workflow_id);
@@ -186,14 +275,14 @@ export function submitAsyncTaskResult(taskId: string, input: { status: "succeede
       workflow.current_task_id = undefined;
       workflow.updated_at = now();
       workflows.set(workflow.id, workflow);
-      appendEvent({ workflow_id: workflow.id, task_id: task.id, event_type: "workflow_succeeded", actor: "state_engine", data_json: {} });
+      appendMemoryEvent({ workflow_id: workflow.id, task_id: task.id, event_type: "workflow_succeeded", actor: "state_engine", data_json: {} });
     }
     return { task };
   }
 
   const next = nextTaskType(task, task.result_json ?? {});
   if (!next) return { task };
-  const nextTask = createTask({ workflow_id: task.workflow_id, parent_task_id: task.id, type: next, status: next === "wait_github_ci" ? "waiting_external" : "queued", payload_json: task.result_json ?? {}, wait_key: String(task.result_json?.head_sha ?? task.result_json?.pr_number ?? "") || undefined });
+  const nextTask = createMemoryTask({ workflow_id: task.workflow_id, parent_task_id: task.id, type: next, status: next === "wait_github_ci" ? "waiting_external" : "queued", payload_json: task.result_json ?? {}, wait_key: String(task.result_json?.head_sha ?? task.result_json?.pr_number ?? "") || undefined });
   if (next === "wait_github_ci") {
     const workflow = workflows.get(task.workflow_id);
     if (workflow) {
@@ -205,7 +294,31 @@ export function submitAsyncTaskResult(taskId: string, input: { status: "succeede
   return { task, next_task: nextTask };
 }
 
-export function handleGithubCiEvent(input: { delivery_id: string; repo?: string; pr_number?: number; head_sha?: string; conclusion?: string }): { matched: number; ignored_duplicate: boolean } {
+export async function handleGithubCiEvent(
+  config: AppConfig,
+  input: { delivery_id: string; repo?: string; pr_number?: number; head_sha?: string; conclusion?: string }
+): Promise<{ matched: number; ignored_duplicate: boolean }> {
+  if (isSupabaseConfigured(config)) {
+    const delivery = await recordWebhookDelivery(config, {
+      provider: "github",
+      delivery_id: input.delivery_id,
+      event_type: "ci_status",
+      payload_json: input
+    });
+    if (delivery.ignored_duplicate) return { matched: 0, ignored_duplicate: true };
+
+    const waitingTasks = await findWaitingGithubTasks(config, input);
+    for (const task of waitingTasks) {
+      await submitAsyncTaskResult(config, task.id, {
+        status: input.conclusion === "failure" ? "failed" : "succeeded",
+        artifacts: { conclusion: input.conclusion ?? "success", delivery_id: input.delivery_id }
+      });
+    }
+
+    await markWebhookDeliveryProcessed(config, "github", input.delivery_id);
+    return { matched: waitingTasks.length, ignored_duplicate: false };
+  }
+
   if (processedDeliveries.has(input.delivery_id)) return { matched: 0, ignored_duplicate: true };
   processedDeliveries.add(input.delivery_id);
   let matched = 0;
@@ -215,7 +328,7 @@ export function handleGithubCiEvent(input: { delivery_id: string; repo?: string;
     const match = Boolean((input.head_sha && waitKey.includes(input.head_sha)) || (input.pr_number && waitKey.includes(String(input.pr_number))));
     if (!match) continue;
     matched += 1;
-    submitAsyncTaskResult(task.id, { status: input.conclusion === "failure" ? "failed" : "succeeded", artifacts: { conclusion: input.conclusion ?? "success", delivery_id: input.delivery_id } });
+    await submitAsyncTaskResult(config, task.id, { status: input.conclusion === "failure" ? "failed" : "succeeded", artifacts: { conclusion: input.conclusion ?? "success", delivery_id: input.delivery_id } });
   }
   return { matched, ignored_duplicate: false };
 }

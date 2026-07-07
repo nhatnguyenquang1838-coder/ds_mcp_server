@@ -69,7 +69,7 @@ export async function handleAgentOpsRestApi(
   try {
     if (req.method === "POST" && url.pathname === "/api/workflows") {
       const body = createAsyncWorkflowSchema.parse(await readJsonBody(req));
-      const output = createAsyncWorkflow(body);
+      const output = await createAsyncWorkflow(config, body);
       sendJson(res, 202, { ok: true, workflow: output.workflow, current_task: output.task });
       return true;
     }
@@ -77,7 +77,7 @@ export async function handleAgentOpsRestApi(
     const workflowMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)$/);
 
     if (req.method === "GET" && workflowMatch) {
-      const output = getAsyncWorkflow(decodePathValue(workflowMatch[1]));
+      const output = await getAsyncWorkflow(config, decodePathValue(workflowMatch[1]));
       if (!output) {
         sendJson(res, 404, { error: "Workflow not found" });
         return true;
@@ -88,7 +88,7 @@ export async function handleAgentOpsRestApi(
 
     if (req.method === "POST" && url.pathname === "/api/async-tasks/claim") {
       const body = claimAsyncTaskSchema.parse(await readJsonBody(req));
-      sendJson(res, 200, { ok: true, task: claimAsyncTask(body) ?? null });
+      sendJson(res, 200, { ok: true, task: await claimAsyncTask(config, body) ?? null });
       return true;
     }
 
@@ -96,7 +96,7 @@ export async function handleAgentOpsRestApi(
 
     if (req.method === "POST" && asyncResultMatch) {
       const body = submitAsyncTaskResultSchema.parse(await readJsonBody(req));
-      const output = submitAsyncTaskResult(decodePathValue(asyncResultMatch[1]), body);
+      const output = await submitAsyncTaskResult(config, decodePathValue(asyncResultMatch[1]), body);
       if (!output) {
         sendJson(res, 404, { error: "Task not found" });
         return true;
@@ -107,7 +107,7 @@ export async function handleAgentOpsRestApi(
 
     if (req.method === "POST" && url.pathname === "/api/webhooks/github") {
       const body = githubCiEventSchema.parse(await readJsonBody(req));
-      sendJson(res, 200, { ok: true, ...handleGithubCiEvent(body) });
+      sendJson(res, 200, { ok: true, ...(await handleGithubCiEvent(config, body)) });
       return true;
     }
 
