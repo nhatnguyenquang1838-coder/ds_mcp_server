@@ -3,6 +3,8 @@ export type AuditAction =
   | "github_create_branch"
   | "github_upsert_file"
   | "github_apply_text_patch"
+  | "github_push_file"
+  | "github_replace_in_file"
   | "github_commit_files"
   | "github_delete_file"
   | "github_create_pr"

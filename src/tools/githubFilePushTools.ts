@@ -55,6 +55,27 @@ type ReplaceInFileInput = GitHubRepoRef & {
   replacements: TextReplacement[];
 };
 
+type TextContent = { type: "text"; text: string };
+type ToolTextResult = {
+  structuredContent: Record<string, unknown>;
+  content: TextContent[];
+};
+
+function toStructuredContent(output: unknown): Record<string, unknown> {
+  if (output && typeof output === "object" && !Array.isArray(output)) {
+    return output as Record<string, unknown>;
+  }
+
+  return { value: output };
+}
+
+function textOutput(output: unknown): ToolTextResult {
+  return {
+    structuredContent: toStructuredContent(output),
+    content: [{ type: "text", text: JSON.stringify(output) }]
+  };
+}
+
 function requireGitHubToken(config: AppConfig): string {
   if (!config.githubToken) throw new Error("GITHUB_TOKEN is not configured");
   return config.githubToken;
@@ -105,11 +126,12 @@ function decodeUtf8File(file: GitHubContentResponse, path: string): string {
 
 async function githubFetch<T>(config: AppConfig, path: string, init: RequestInit = {}): Promise<T> {
   const token = requireGitHubToken(config);
+  const authHeader = ["Bearer", token].join(" ");
   const response = await fetch(`https://api.github.com${path}`, {
     ...init,
     headers: {
       Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
+      Authorization: authHeader,
       "X-GitHub-Api-Version": "2022-11-28",
       ...(init.headers ?? {})
     }
@@ -311,10 +333,7 @@ export function registerGitHubFilePushTools(server: McpServer, config: AppConfig
         path: input.path,
         status: "success"
       });
-      return {
-        structuredContent: output,
-        content: [{ type: "text", text: JSON.stringify(output) }]
-      };
+      return textOutput(output);
     }
   );
 
@@ -352,10 +371,7 @@ export function registerGitHubFilePushTools(server: McpServer, config: AppConfig
         path: input.path,
         status: "success"
       });
-      return {
-        structuredContent: output,
-        content: [{ type: "text", text: JSON.stringify(output) }]
-      };
+      return textOutput(output);
     }
   );
 }
