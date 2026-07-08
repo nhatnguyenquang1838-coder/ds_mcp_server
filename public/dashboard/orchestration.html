@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Orchestration Dashboard</title>
+  <style>
+    :root { color-scheme: light dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    body { margin: 0; padding: 28px; background: #0f172a; color: #e2e8f0; }
+    header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 20px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { color: #94a3b8; margin: 0; line-height: 1.5; }
+    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    input { background: #111827; border: 1px solid #334155; color: #e2e8f0; border-radius: 10px; padding: 10px 12px; min-width: 260px; }
+    button { background: #1e293b; border: 1px solid #475569; color: #f8fafc; border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+    button:hover { background: #334155; }
+    .status { margin-bottom: 18px; color: #cbd5e1; font-size: 13px; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .card { background: #111827; border: 1px solid #334155; border-radius: 16px; padding: 14px; }
+    .label { color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+    .value { font-size: 26px; font-weight: 760; margin-top: 4px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; }
+    section { background: #111827; border: 1px solid #334155; border-radius: 16px; overflow: hidden; }
+    section h2 { margin: 0; padding: 14px 16px; font-size: 16px; background: #1e293b; color: #f8fafc; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 10px 12px; border-top: 1px solid #334155; vertical-align: top; font-size: 12px; }
+    th { color: #cbd5e1; }
+    td { color: #e2e8f0; }
+    code { color: #bfdbfe; word-break: break-all; }
+    .muted { color: #94a3b8; }
+    .pill { display: inline-flex; border: 1px solid #475569; border-radius: 999px; padding: 2px 8px; font-size: 12px; color: #cbd5e1; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Orchestration Dashboard</h1>
+      <p>Local-first dashboard. It renders cached data from browser IndexedDB first, then refreshes from Supabase-backed APIs in the background.</p>
+    </div>
+    <div class="toolbar">
+      <input id="token" type="password" autocomplete="off" placeholder="REST bearer token, stored in session only" />
+      <button id="save-token">Use token</button>
+      <button id="refresh">Refresh</button>
+      <button id="clear-cache">Clear local DB</button>
+    </div>
+  </header>
+
+  <div id="status" class="status">Opening embedded browser DB...</div>
+  <div id="cards" class="cards"></div>
+
+  <div class="grid">
+    <section><h2>Queued Tasks</h2><div id="task_queue"></div></section>
+    <section><h2>Agent Health</h2><div id="agent_health"></div></section>
+    <section><h2>Waiting</h2><div id="waiting"></div></section>
+    <section><h2>Failed Tasks</h2><div id="failed_tasks"></div></section>
+    <section><h2>Dead Letter</h2><div id="dead_letter_tasks"></div></section>
+    <section><h2>Scheduler Runs</h2><div id="scheduler_runs"></div></section>
+    <section><h2>Events</h2><div id="events"></div></section>
+  </div>
+
+  <script>
+    (function () {
+      var DB_NAME = "ds-mcp-local-dashboard";
+      var DB_VERSION = 1;
+      var STORE = "snapshots";
+      var SNAPSHOT_KEY = "orchestration:snapshot:v1";
+      var SUMMARY_KEY = "orchestration:summary:v1";
+      var dbPromise = null;
+
+      function el(id) { return document.getElementById(id); }
+      function setStatus(message) { el("status").textContent = message; }
+      function esc(value) {
+        return String(value == null ? "" : value)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#39;");
+      }
+
+      function openDb() {
+        if (dbPromise) return dbPromise;
+        dbPromise = new Promise(function (resolve, reject) {
+          if (!window.indexedDB) {
+            reject(new Error("IndexedDB is not available in this browser"));
+            return;
+          }
+          var request = indexedDB.open(DB_NAME, DB_VERSION);
+          request.onupgradeneeded = function () {
+            var db = request.result;
+            if (!db.objectStoreNames.contains(STORE)) {
+              db.createObjectStore(STORE, { keyPath: "key" });
+            }
+          };
+          request.onsuccess = function () { resolve(request.result); };
+          request.onerror = function () { reject(request.error || new Error("IndexedDB open failed")); };
+        });
+        return dbPromise;
+      }
+
+      async function readCache(key) {
+        try {
+          var db = await openDb();
+          return await new Promise(function (resolve, reject) {
+            var tx = db.transaction(STORE, "readonly");
+            var req = tx.objectStore(STORE).get(key);
+            req.onsuccess = function () { resolve(req.result || null); };
+            req.onerror = function () { reject(req.error); };
+          });
+        } catch (error) {
+          var fallback = localStorage.getItem(key);
+          return fallback ? JSON.parse(fallback) : null;
+        }
+      }
+
+      async function writeCache(key, value) {
+        var record = { key: key, value: value, updated_at: new Date().toISOString() };
+        try {
+          var db = await openDb();
+          await new Promise(function (resolve, reject) {
+            var tx = db.transaction(STORE, "readwrite");
+            tx.objectStore(STORE).put(record);
+            tx.oncomplete = function () { resolve(); };
+            tx.onerror = function () { reject(tx.error); };
+          });
+        } catch (error) {
+          localStorage.setItem(key, JSON.stringify(record));
+        }
+      }
+
+      async function clearCache() {
+        try {
+          var db = await openDb();
+          await new Promise(function (resolve, reject) {
+            var tx = db.transaction(STORE, "readwrite");
+            tx.objectStore(STORE).clear();
+            tx.oncomplete = function () { resolve(); };
+            tx.onerror = function () { reject(tx.error); };
+          });
+        } catch (error) {
+          localStorage.removeItem(SNAPSHOT_KEY);
+          localStorage.removeItem(SUMMARY_KEY);
+        }
+      }
+
+      function authHeaders() {
+        var token = sessionStorage.getItem("ds_mcp_rest_bearer") || "";
+        var headers = { "accept": "application/json" };
+        if (token) headers.authorization = "Bearer " + token;
+        return headers;
+      }
+
+      async function apiGet(path) {
+        var res = await fetch(path, { headers: authHeaders() });
+        if (!res.ok) throw new Error(path + " failed: HTTP " + res.status);
+        return res.json();
+      }
+
+      function renderCards(summary, sourceLabel, timestamp) {
+        var counts = summary && summary.counts ? summary.counts : {};
+        var attention = summary && summary.attention ? summary.attention : {};
+        var rows = [
+          ["Source", sourceLabel],
+          ["Needs attention", attention.needs_attention || 0],
+          ["Queued", counts.queued_tasks || 0],
+          ["Waiting", counts.waiting || 0],
+          ["Failed", counts.failed_tasks || 0],
+          ["Dead letter", counts.dead_letter_tasks || 0],
+          ["Online agents", counts.online_agents || 0],
+          ["Stale agents", counts.stale_agents || 0],
+          ["Scheduler runs", counts.scheduler_runs || 0]
+        ];
+        el("cards").innerHTML = rows.map(function (item) {
+          return '<div class="card"><div class="label">' + esc(item[0]) + '</div><div class="value">' + esc(item[1]) + '</div></div>';
+        }).join("");
+        setStatus("Rendered " + sourceLabel + (timestamp ? " at " + timestamp : ""));
+      }
+
+      function compactRow(row) {
+        if (!row || typeof row !== "object") return row;
+        return {
+          id: row.id || row.task_id || row.workflow_id || row.original_task_id || "",
+          type: row.type || row.event_type || row.workflow_type || row.status || "",
+          status: row.status || row.freshness || row.conclusion || "",
+          updated_at: row.updated_at || row.created_at || row.failed_at || row.started_at || row.last_seen_at || ""
+        };
+      }
+
+      function table(rows, emptyText) {
+        if (!Array.isArray(rows) || rows.length === 0) {
+          return '<p class="muted" style="padding:12px 16px">' + esc(emptyText || "No data") + '</p>';
+        }
+        var body = rows.slice(0, 12).map(function (raw) {
+          var row = compactRow(raw);
+          return "<tr><td><code>" + esc(row.id) + "</code></td><td>" + esc(row.type) + "</td><td><span class=\"pill\">" + esc(row.status) + "</span></td><td>" + esc(row.updated_at) + "</td></tr>";
+        }).join("");
+        return '<table><thead><tr><th>ID</th><th>Type/Event</th><th>Status</th><th>Time</th></tr></thead><tbody>' + body + '</tbody></table>';
+      }
+
+      function renderSnapshot(snapshot, sourceLabel, timestamp) {
+        if (!snapshot) return;
+        renderCards(snapshot.summary, sourceLabel, timestamp || snapshot.generated_at);
+        ["task_queue", "agent_health", "waiting", "failed_tasks", "dead_letter_tasks", "scheduler_runs", "events"].forEach(function (key) {
+          el(key).innerHTML = table(snapshot[key], "No " + key.replaceAll("_", " "));
+        });
+      }
+
+      async function refresh() {
+        setStatus("Refreshing from API...");
+        var summary = await apiGet("/api/dashboard/summary");
+        await writeCache(SUMMARY_KEY, summary);
+        renderCards(summary.summary, "API summary", summary.generated_at);
+
+        var snapshot = await apiGet("/api/dashboard/orchestration?limit=50");
+        await writeCache(SNAPSHOT_KEY, snapshot);
+        renderSnapshot(snapshot, snapshot.cache && snapshot.cache.hit ? "server cache" : "API sync", snapshot.generated_at);
+      }
+
+      async function boot() {
+        el("token").value = sessionStorage.getItem("ds_mcp_rest_bearer") || "";
+        el("save-token").onclick = function () {
+          sessionStorage.setItem("ds_mcp_rest_bearer", el("token").value.trim());
+          setStatus("Bearer token saved in sessionStorage only. It is not written to IndexedDB.");
+        };
+        el("refresh").onclick = function () { refresh().catch(function (error) { setStatus(error.message); }); };
+        el("clear-cache").onclick = function () {
+          clearCache().then(function () { setStatus("Local embedded DB cache cleared."); });
+        };
+
+        var cached = await readCache(SNAPSHOT_KEY);
+        if (cached && cached.value) {
+          renderSnapshot(cached.value, "browser local DB", cached.updated_at);
+        } else {
+          setStatus("No local DB cache yet. Fetching API...");
+        }
+
+        refresh().catch(function (error) {
+          setStatus("API refresh failed; using local cache if available. " + error.message);
+        });
+        setInterval(function () {
+          refresh().catch(function (error) { setStatus("Auto-refresh failed: " + error.message); });
+        }, 15000);
+      }
+
+      boot();
+    })();
+  </script>
+</body>
+</html>
