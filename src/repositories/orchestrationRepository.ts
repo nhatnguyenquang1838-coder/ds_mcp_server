@@ -41,6 +41,15 @@ type TaskEventRow = AsyncTaskEvent & {
   payload_json?: JsonRecord;
 };
 
+export type RetryPolicy = {
+  id: string;
+  task_type: string;
+  max_attempts: number;
+  base_delay_seconds: number;
+  max_delay_seconds: number;
+  backoff_multiplier: number;
+};
+
 function asWorkflow(row: WorkflowRow): AsyncWorkflow {
   return {
     id: row.id,
@@ -83,6 +92,17 @@ function asTaskEvent(row: TaskEventRow): AsyncTaskEvent {
     actor: row.actor,
     data_json: row.data_json ?? row.payload_json ?? {},
     created_at: row.created_at
+  };
+}
+
+function asRetryPolicy(row: Record<string, unknown>, taskType: string, fallbackMaxAttempts = 3): RetryPolicy {
+  return {
+    id: String(row.id ?? `default_${taskType}`),
+    task_type: String(row.task_type ?? taskType),
+    max_attempts: typeof row.max_attempts === "number" ? row.max_attempts : fallbackMaxAttempts,
+    base_delay_seconds: typeof row.base_delay_seconds === "number" ? row.base_delay_seconds : 30,
+    max_delay_seconds: typeof row.max_delay_seconds === "number" ? row.max_delay_seconds : 3600,
+    backoff_multiplier: typeof row.backoff_multiplier === "number" ? row.backoff_multiplier : Number(row.backoff_multiplier ?? 2)
   };
 }
 
@@ -335,6 +355,16 @@ export async function updateTaskResultRecord(
   input: { status: "succeeded" | "failed"; summary?: string; artifacts?: JsonRecord; error?: JsonRecord }
 ): Promise<AsyncTask | undefined> {
   const supabase = getSupabaseClient(config);
+  const { data: current, error: currentError } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("id", taskId)
+    .maybeSingle();
+  if (currentError) throw new Error(`Failed to load task before result update: ${currentError.message}`);
+  if (!current) return undefined;
+
+  const currentTask = asTask(current as TaskRow);
+  const nextRetryCount = input.status === "failed" ? currentTask.retry_count + 1 : currentTask.retry_count;
   const resultJson = { summary: input.summary, ...(input.artifacts ?? {}) };
   const { data, error } = await supabase
     .from("tasks")
@@ -342,8 +372,13 @@ export async function updateTaskResultRecord(
       status: input.status,
       result_json: resultJson,
       error_json: input.error ?? null,
+      retry_count: nextRetryCount,
+      attempts: nextRetryCount,
+      lease_owner: null,
+      lease_token: null,
+      lease_expires_at: null,
       updated_at: now(),
-      completed_at: now()
+      completed_at: input.status === "succeeded" ? now() : null
     })
     .eq("id", taskId)
     .select("*")
@@ -361,26 +396,106 @@ export async function updateTaskResultRecord(
     data_json: input
   });
 
-  if (input.status === "failed") {
-    await supabase.from("dead_letter_tasks").insert({
-      id: createId("dlt"),
-      original_task_id: task.id,
-      workflow_id: task.workflow_id,
-      type: task.type,
-      payload_json: task.payload_json,
-      error_json: input.error ?? resultJson,
-      failed_at: now()
-    });
-    await appendTaskEvent(config, {
-      workflow_id: task.workflow_id,
-      task_id: task.id,
-      event_type: "task_moved_to_dead_letter",
-      actor: "state_engine",
-      data_json: { reason: "task_failed" }
-    });
-  }
-
   return task;
+}
+
+export async function getRetryPolicyForTaskType(
+  config: AppConfig,
+  taskType: AsyncTaskType,
+  fallbackMaxAttempts = 3
+): Promise<RetryPolicy> {
+  const supabase = getSupabaseClient(config);
+  const { data, error } = await supabase
+    .from("retry_policies")
+    .select("*")
+    .eq("task_type", taskType)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load retry policy: ${error.message}`);
+  return asRetryPolicy((data as Record<string, unknown> | null) ?? {}, taskType, fallbackMaxAttempts);
+}
+
+export function computeRetryRunAfter(policy: RetryPolicy, attemptNumber: number): string {
+  const exponent = Math.max(0, attemptNumber - 1);
+  const delay = Math.min(
+    policy.max_delay_seconds,
+    Math.floor(policy.base_delay_seconds * Math.pow(policy.backoff_multiplier, exponent))
+  );
+  return new Date(Date.now() + delay * 1000).toISOString();
+}
+
+export async function scheduleTaskRetry(
+  config: AppConfig,
+  task: AsyncTask,
+  policy: RetryPolicy
+): Promise<AsyncTask> {
+  const supabase = getSupabaseClient(config);
+  const runAfter = computeRetryRunAfter(policy, task.retry_count);
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({
+      status: "queued" satisfies AsyncTaskStatus,
+      run_after: runAfter,
+      lease_owner: null,
+      lease_token: null,
+      lease_expires_at: null,
+      completed_at: null,
+      updated_at: now()
+    })
+    .eq("id", task.id)
+    .select("*")
+    .single();
+  if (error) throw new Error(`Failed to schedule task retry: ${error.message}`);
+
+  const updated = asTask(data as TaskRow);
+  await appendTaskEvent(config, {
+    workflow_id: task.workflow_id,
+    task_id: task.id,
+    event_type: "task_retry_scheduled",
+    actor: "state_engine",
+    data_json: {
+      attempt: task.retry_count,
+      max_attempts: policy.max_attempts,
+      run_after: runAfter,
+      policy_id: policy.id
+    }
+  });
+  return updated;
+}
+
+export async function moveTaskToDeadLetter(
+  config: AppConfig,
+  task: AsyncTask,
+  reason: string,
+  errorJson?: JsonRecord
+): Promise<AsyncTask> {
+  const supabase = getSupabaseClient(config);
+  const failureTime = now();
+  await supabase.from("dead_letter_tasks").insert({
+    id: createId("dlt"),
+    original_task_id: task.id,
+    workflow_id: task.workflow_id,
+    type: task.type,
+    payload_json: task.payload_json,
+    error_json: errorJson ?? task.error_json ?? task.result_json ?? { reason },
+    failed_at: failureTime
+  });
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .update({ status: "dead_letter" satisfies AsyncTaskStatus, updated_at: failureTime, completed_at: failureTime })
+    .eq("id", task.id)
+    .select("*")
+    .single();
+  if (error) throw new Error(`Failed to mark task dead-letter: ${error.message}`);
+
+  await appendTaskEvent(config, {
+    workflow_id: task.workflow_id,
+    task_id: task.id,
+    event_type: "task_moved_to_dead_letter",
+    actor: "state_engine",
+    data_json: { reason }
+  });
+  return asTask(data as TaskRow);
 }
 
 export async function recordWebhookDelivery(
