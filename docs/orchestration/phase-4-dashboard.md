@@ -12,6 +12,12 @@ The dashboard should show what entered the platform, what is running, what is wa
 
 Shows workflow instances by status, type, age, current state, and last event.
 
+### Dashboard Summary
+
+Shows operator-first counts for queued tasks, running agents, waiting work, failed tasks, dead-letter tasks, webhook deliveries, and events.
+
+The summary also exposes a `needs_attention` count so an operator can quickly identify whether waiting, failed, or dead-letter work exists before drilling into detail pages.
+
 ### Task Queue
 
 Shows queued tasks, priority, `run_after`, attempts, task type, and workflow id.
@@ -48,6 +54,8 @@ Dashboard pages must query Supabase tables introduced in Phase 2. Do not use pro
 
 Suggested read-only endpoints:
 
+- `GET /api/dashboard/orchestration`
+- `GET /api/dashboard/summary`
 - `GET /api/dashboard/workflows`
 - `GET /api/dashboard/tasks`
 - `GET /api/dashboard/agents/running`
@@ -69,6 +77,7 @@ Suggested read-only endpoints:
 
 - Dashboard data survives server restart.
 - Operators can see queued, running, waiting, failed, and dead-letter work.
+- Operators can read a single summary payload before drilling into detail pages.
 - Upstream activity is visible from durable data.
 - Event timeline can reconstruct the lifecycle of one workflow or task.
 - No sensitive token or secret is displayed.
