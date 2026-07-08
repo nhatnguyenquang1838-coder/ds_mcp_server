@@ -94,6 +94,14 @@ function isAgentOpsPath(pathname: string): boolean {
 
 function dashboardSection(snapshot: Awaited<ReturnType<typeof getOrchestrationDashboardSnapshot>>, pathname: string): unknown {
   if (pathname === "/api/dashboard/orchestration") return snapshot;
+  if (pathname === "/api/dashboard/summary") {
+    return {
+      ok: true,
+      generated_at: snapshot.generated_at,
+      supabase_configured: snapshot.supabase_configured,
+      summary: snapshot.summary
+    };
+  }
   if (pathname === "/api/dashboard/workflows") return { ok: true, workflows: snapshot.workflows };
   if (pathname === "/api/dashboard/tasks") return { ok: true, tasks: snapshot.task_queue };
   if (pathname === "/api/dashboard/agents/running") return { ok: true, agents: snapshot.running_agents };
