@@ -38,6 +38,11 @@ export type OrchestrationDashboardSnapshot = {
   ok: true;
   generated_at: string;
   supabase_configured: boolean;
+  cache?: {
+    hit: boolean;
+    cached_at?: string;
+    ttl_ms: number;
+  };
   summary: OrchestrationDashboardSummary;
   workflows: unknown[];
   task_queue: unknown[];
@@ -53,8 +58,43 @@ export type OrchestrationDashboardSnapshot = {
   events: unknown[];
 };
 
+type CachedDashboardSnapshot = {
+  cachedAtMs: number;
+  value: OrchestrationDashboardSnapshot;
+};
+
+const dashboardSnapshotCache = new Map<string, CachedDashboardSnapshot>();
+
 function now(): string {
   return new Date().toISOString();
+}
+
+function dashboardCacheTtlMs(): number {
+  const raw = Number(process.env.DASHBOARD_CACHE_TTL_MS ?? 1500);
+  if (!Number.isFinite(raw) || raw < 0) return 1500;
+  return Math.floor(raw);
+}
+
+function cacheKey(limit: number): string {
+  return `orchestration:${limit}`;
+}
+
+function withCacheMetadata(
+  snapshot: OrchestrationDashboardSnapshot,
+  input: { hit: boolean; cachedAtMs?: number; ttlMs: number }
+): OrchestrationDashboardSnapshot {
+  return {
+    ...snapshot,
+    cache: {
+      hit: input.hit,
+      cached_at: input.cachedAtMs ? new Date(input.cachedAtMs).toISOString() : undefined,
+      ttl_ms: input.ttlMs
+    }
+  };
+}
+
+export function clearOrchestrationDashboardCache(): void {
+  dashboardSnapshotCache.clear();
 }
 
 function fieldString(row: unknown, field: string): string | undefined {
@@ -163,14 +203,25 @@ export async function getOrchestrationDashboardSnapshot(
   config: AppConfig,
   limit = 50
 ): Promise<OrchestrationDashboardSnapshot> {
+  const ttlMs = dashboardCacheTtlMs();
+  const normalizedLimit = Number.isFinite(limit) && limit > 0 ? Math.floor(limit) : 50;
+  const key = cacheKey(normalizedLimit);
+
+  if (ttlMs > 0) {
+    const cached = dashboardSnapshotCache.get(key);
+    if (cached && Date.now() - cached.cachedAtMs <= ttlMs) {
+      return withCacheMetadata(cached.value, { hit: true, cachedAtMs: cached.cachedAtMs, ttlMs });
+    }
+  }
+
   if (!isSupabaseConfigured(config)) {
     const [agentHealth, cronSchedules, retryPolicies, schedulerRuns] = await Promise.all([
       listAgentHealth(config),
-      listCronSchedules(config, limit),
-      listRetryPolicies(config, limit),
-      listSchedulerRuns(config, limit)
+      listCronSchedules(config, normalizedLimit),
+      listRetryPolicies(config, normalizedLimit),
+      listSchedulerRuns(config, normalizedLimit)
     ]);
-    return {
+    const snapshot: OrchestrationDashboardSnapshot = {
       ok: true,
       generated_at: now(),
       supabase_configured: false,
@@ -201,18 +252,19 @@ export async function getOrchestrationDashboardSnapshot(
       scheduler_runs: schedulerRuns,
       events: []
     };
+    return withCacheMetadata(snapshot, { hit: false, ttlMs });
   }
 
   const supabase = getSupabaseClient(config);
   const [workflows, taskQueue, leases, waiting, failedTasks, deadLetters, webhooks, events] = await Promise.all([
-    selectList(config, "workflows", { limit, orderColumn: "updated_at" }),
-    selectList(config, "tasks", { limit, status: "queued", orderColumn: "updated_at" }),
-    selectList(config, "task_leases", { limit, status: "active", orderColumn: "leased_at" }),
-    selectList(config, "tasks", { limit, status: "waiting_external", orderColumn: "updated_at" }),
-    selectList(config, "tasks", { limit, status: "failed", orderColumn: "updated_at" }),
-    selectList(config, "dead_letter_tasks", { limit, orderColumn: "failed_at" }),
-    selectList(config, "webhook_deliveries", { limit, orderColumn: "received_at" }),
-    selectList(config, "task_events", { limit, orderColumn: "created_at" })
+    selectList(config, "workflows", { limit: normalizedLimit, orderColumn: "updated_at" }),
+    selectList(config, "tasks", { limit: normalizedLimit, status: "queued", orderColumn: "updated_at" }),
+    selectList(config, "task_leases", { limit: normalizedLimit, status: "active", orderColumn: "leased_at" }),
+    selectList(config, "tasks", { limit: normalizedLimit, status: "waiting_external", orderColumn: "updated_at" }),
+    selectList(config, "tasks", { limit: normalizedLimit, status: "failed", orderColumn: "updated_at" }),
+    selectList(config, "dead_letter_tasks", { limit: normalizedLimit, orderColumn: "failed_at" }),
+    selectList(config, "webhook_deliveries", { limit: normalizedLimit, orderColumn: "received_at" }),
+    selectList(config, "task_events", { limit: normalizedLimit, orderColumn: "created_at" })
   ]);
 
   const agentIds = [...new Set((leases as Array<{ agent_id?: string }>).map((lease) => lease.agent_id).filter(Boolean))];
@@ -225,12 +277,12 @@ export async function getOrchestrationDashboardSnapshot(
 
   const [agentHealth, cronSchedules, retryPolicies, schedulerRuns] = await Promise.all([
     listAgentHealth(config),
-    listCronSchedules(config, limit),
-    listRetryPolicies(config, limit),
-    listSchedulerRuns(config, limit)
+    listCronSchedules(config, normalizedLimit),
+    listRetryPolicies(config, normalizedLimit),
+    listSchedulerRuns(config, normalizedLimit)
   ]);
 
-  return {
+  const snapshot: OrchestrationDashboardSnapshot = {
     ok: true,
     generated_at: now(),
     supabase_configured: true,
@@ -261,4 +313,10 @@ export async function getOrchestrationDashboardSnapshot(
     scheduler_runs: schedulerRuns,
     events
   };
+
+  if (ttlMs > 0) {
+    dashboardSnapshotCache.set(key, { cachedAtMs: Date.now(), value: snapshot });
+  }
+
+  return withCacheMetadata(snapshot, { hit: false, ttlMs });
 }
