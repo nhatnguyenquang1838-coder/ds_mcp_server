@@ -68,6 +68,7 @@ const heartbeatSchema = z.object({
   current_task_id: z.string().optional(),
   current_lease_id: z.string().optional(),
   queue_depth: z.number().int().nonnegative().optional(),
+  remaining_credits: z.number().nonnegative().optional(),
   payload_json: z.record(z.unknown()).default({})
 });
 
@@ -252,7 +253,7 @@ export function registerAgentOpsMcpTools(server: McpServer, config: AppConfig): 
     "agent_health",
     {
       title: "List agent health",
-      description: "List registered agents with heartbeat freshness and queue stats.",
+      description: "List registered agents with heartbeat freshness, current task, remaining credits, and queue stats.",
       inputSchema: { stale_after_seconds: z.number().int().positive().default(120) },
       annotations: { readOnlyHint: true }
     },
@@ -274,7 +275,7 @@ export function registerAgentOpsMcpTools(server: McpServer, config: AppConfig): 
     "agent_heartbeat",
     {
       title: "Record agent heartbeat",
-      description: "Record agent liveness, status, current task, and queue depth.",
+      description: "Record agent liveness, status, current task, queue depth, and remaining credits.",
       inputSchema: heartbeatSchema.shape,
       annotations: { readOnlyHint: false }
     },
