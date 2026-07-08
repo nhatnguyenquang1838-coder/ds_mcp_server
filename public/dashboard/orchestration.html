@@ -21,6 +21,7 @@
     .value { font-size: 26px; font-weight: 760; margin-top: 4px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 16px; }
     section { background: #111827; border: 1px solid #334155; border-radius: 16px; overflow: hidden; }
+    section.wide { grid-column: 1 / -1; }
     section h2 { margin: 0; padding: 14px 16px; font-size: 16px; background: #1e293b; color: #f8fafc; }
     table { width: 100%; border-collapse: collapse; }
     th, td { text-align: left; padding: 10px 12px; border-top: 1px solid #334155; vertical-align: top; font-size: 12px; }
@@ -29,6 +30,7 @@
     code { color: #bfdbfe; word-break: break-all; }
     .muted { color: #94a3b8; }
     .pill { display: inline-flex; border: 1px solid #475569; border-radius: 999px; padding: 2px 8px; font-size: 12px; color: #cbd5e1; }
+    .credits { font-variant-numeric: tabular-nums; }
   </style>
 </head>
 <body>
@@ -49,8 +51,8 @@
   <div id="cards" class="cards"></div>
 
   <div class="grid">
+    <section class="wide"><h2>Agent Status</h2><div id="agent_status"></div></section>
     <section><h2>Queued Tasks</h2><div id="task_queue"></div></section>
-    <section><h2>Agent Health</h2><div id="agent_health"></div></section>
     <section><h2>Waiting</h2><div id="waiting"></div></section>
     <section><h2>Failed Tasks</h2><div id="failed_tasks"></div></section>
     <section><h2>Dead Letter</h2><div id="dead_letter_tasks"></div></section>
@@ -186,6 +188,34 @@
         };
       }
 
+      function agentTask(agent) {
+        return agent.current_task_id || (agent.last_heartbeat && agent.last_heartbeat.current_task_id) || "idle";
+      }
+
+      function agentCredits(agent) {
+        var value = agent.remaining_credits;
+        if (value == null && agent.last_heartbeat) value = agent.last_heartbeat.remaining_credits;
+        return value == null ? "—" : value;
+      }
+
+      function renderAgentStatus(rows) {
+        if (!Array.isArray(rows) || rows.length === 0) {
+          return '<p class="muted" style="padding:12px 16px">No agent status data</p>';
+        }
+        var body = rows.map(function (agent) {
+          var heartbeatAt = agent.last_heartbeat ? agent.last_heartbeat.created_at : "";
+          return "<tr>" +
+            "<td><strong>" + esc(agent.name || agent.id) + "</strong><br><code>" + esc(agent.id) + "</code></td>" +
+            "<td><span class=\"pill\">" + esc(agent.freshness || "unknown") + "</span><br><span class=\"muted\">" + esc(agent.status || "") + "</span></td>" +
+            "<td><code>" + esc(agentTask(agent)) + "</code></td>" +
+            "<td class=\"credits\">" + esc(agentCredits(agent)) + "</td>" +
+            "<td>" + esc(agent.queue_depth == null ? "—" : agent.queue_depth) + "</td>" +
+            "<td>" + esc(heartbeatAt || agent.last_seen_at || "") + "</td>" +
+            "</tr>";
+        }).join("");
+        return '<table><thead><tr><th>Agent</th><th>Status</th><th>Current task</th><th>Remain credits</th><th>Queue</th><th>Last heartbeat</th></tr></thead><tbody>' + body + '</tbody></table>';
+      }
+
       function table(rows, emptyText) {
         if (!Array.isArray(rows) || rows.length === 0) {
           return '<p class="muted" style="padding:12px 16px">' + esc(emptyText || "No data") + '</p>';
@@ -200,7 +230,8 @@
       function renderSnapshot(snapshot, sourceLabel, timestamp) {
         if (!snapshot) return;
         renderCards(snapshot.summary, sourceLabel, timestamp || snapshot.generated_at);
-        ["task_queue", "agent_health", "waiting", "failed_tasks", "dead_letter_tasks", "scheduler_runs", "events"].forEach(function (key) {
+        el("agent_status").innerHTML = renderAgentStatus(snapshot.agent_health);
+        ["task_queue", "waiting", "failed_tasks", "dead_letter_tasks", "scheduler_runs", "events"].forEach(function (key) {
           el(key).innerHTML = table(snapshot[key], "No " + key.replaceAll("_", " "));
         });
       }
