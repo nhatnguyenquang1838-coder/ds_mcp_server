@@ -853,7 +853,8 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
     config,
     sendJson,
     setCorsHeaders,
-    readJsonBody
+    readJsonBody,
+    readRawBody
   });
   if (handledAgentOpsApi) return true;
 
