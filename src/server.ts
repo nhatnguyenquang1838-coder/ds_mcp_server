@@ -36,6 +36,7 @@ import {
 } from "./tools/agentRunStore.js";
 import { triggerWorkspaceAgent } from "./tools/workspaceAgentClient.js";
 import { handleAgentOpsRestApi } from "./agentops/router.js";
+import { handleGitHubUploadRestApi } from "./githubUploadRouter.js";
 
 const config = loadConfig();
 const serviceVersion = "0.7.0";
@@ -79,7 +80,7 @@ function sendBinary(
 
 function setCorsHeaders(res: ServerResponse): void {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "POST, GET, PATCH, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "POST, PUT, GET, PATCH, DELETE, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
     "authorization, content-type, mcp-session-id"
@@ -345,13 +346,22 @@ function getCapabilities() {
       "/api/github/repos/{owner}/{repo}/workflow-runs",
       "/api/github/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts",
       "/api/github/repos/{owner}/{repo}/actions/artifacts/{artifact_id}/zip",
-      "/api/github/repos/{owner}/{repo}/archive"
+      "/api/github/repos/{owner}/{repo}/archive",
+      "/api/github/repos/{owner}/{repo}/upload-sessions",
+      "/api/github/repos/{owner}/{repo}/upload-sessions/{session_id}",
+      "/api/github/repos/{owner}/{repo}/upload-sessions/{session_id}/chunks/{part_number}",
+      "/api/github/repos/{owner}/{repo}/upload-sessions/{session_id}/complete",
+      "/api/github/repos/{owner}/{repo}/upload-sessions/{session_id}/commit"
     ],
     guardrails: {
       github_allowed_repos: config.githubAllowedRepos,
       github_default_base_branch: config.githubDefaultBaseBranch,
       github_allowed_branch_prefixes: config.githubAllowedBranchPrefixes,
       github_max_file_bytes: config.githubMaxFileBytes,
+      ds_upload_session_ttl_seconds: config.dsUploadSessionTtlSeconds,
+      ds_upload_chunk_max_bytes: config.dsUploadChunkMaxBytes,
+      ds_upload_max_file_bytes: config.dsUploadMaxFileBytes,
+      ds_upload_storage: config.dsUploadStorage,
       protected_branches: ["main", "master", "production", "prod"]
     },
     auth: {
@@ -555,6 +565,13 @@ async function handleGitHubRestApi(
       );
       return true;
     }
+
+    const handledUploadGateway = await handleGitHubUploadRestApi(req, res, url, {
+      config,
+      sendJson,
+      readJsonBody
+    });
+    if (handledUploadGateway) return true;
 
     const archiveMatch = repoRoute(url, "archive");
 
