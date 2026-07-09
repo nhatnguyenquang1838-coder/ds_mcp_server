@@ -20,7 +20,15 @@ export const createAsyncWorkflowSchema = z.object({
 export const claimAsyncTaskSchema = z.object({
   agent_id: z.string().min(1),
   capabilities: z.array(asyncTaskTypeSchema).min(1),
-  lease_seconds: z.number().int().positive().max(900).default(120)
+  lease_seconds: z.number().int().positive().max(900).default(120),
+  task_id: z.string().min(1).optional(),
+  workflow_id: z.string().min(1).optional(),
+  repo: z.string().min(1).optional(),
+  repo_owner: z.string().min(1).optional(),
+  repo_name: z.string().min(1).optional(),
+  branch: z.string().min(1).optional(),
+  repo_branch: z.string().min(1).optional(),
+  pr_number: z.number().int().positive().optional()
 });
 
 export const submitAsyncTaskResultSchema = z.object({

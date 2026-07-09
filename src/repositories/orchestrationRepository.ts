@@ -2,6 +2,7 @@ import type { AppConfig } from "../config.js";
 import { getSupabaseClient } from "../db/supabaseClient.js";
 import type {
   AsyncTask,
+  AsyncTaskClaimInput,
   AsyncTaskEvent,
   AsyncTaskStatus,
   AsyncTaskType,
@@ -104,6 +105,60 @@ function asRetryPolicy(row: Record<string, unknown>, taskType: string, fallbackM
     max_delay_seconds: typeof row.max_delay_seconds === "number" ? row.max_delay_seconds : 3600,
     backoff_multiplier: typeof row.backoff_multiplier === "number" ? row.backoff_multiplier : Number(row.backoff_multiplier ?? 2)
   };
+}
+
+function contextString(context: JsonRecord, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = context[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return undefined;
+}
+
+function contextNumber(context: JsonRecord, keys: string[]): number | undefined {
+  for (const key of keys) {
+    const value = context[key];
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) return Number(value);
+  }
+  return undefined;
+}
+
+function mergedClaimContext(task: AsyncTask, workflow?: AsyncWorkflow): JsonRecord {
+  return {
+    ...(workflow?.context_json ?? {}),
+    ...(task.payload_json ?? {})
+  };
+}
+
+function repoFullName(context: JsonRecord): string | undefined {
+  const explicit = contextString(context, ["repo", "repository", "repo_full_name"]);
+  if (explicit) return explicit;
+  const owner = contextString(context, ["repo_owner", "owner"]);
+  const name = contextString(context, ["repo_name", "repository_name"]);
+  return owner && name ? `${owner}/${name}` : undefined;
+}
+
+function taskMatchesClaimFilters(task: AsyncTask, workflow: AsyncWorkflow | undefined, input: AsyncTaskClaimInput): boolean {
+  if (input.task_id && task.id !== input.task_id) return false;
+  if (input.workflow_id && task.workflow_id !== input.workflow_id) return false;
+
+  const context = mergedClaimContext(task, workflow);
+  const repo = repoFullName(context);
+  const repoOwner = contextString(context, ["repo_owner", "owner"]);
+  const repoName = contextString(context, ["repo_name", "repository_name"]);
+  const branch = contextString(context, ["repo_branch", "work_branch", "branch"]);
+  const prNumber = contextNumber(context, ["pr_number", "pull_number"]);
+
+  if (input.repo && repo !== input.repo) return false;
+  if (input.repo_owner && repoOwner !== input.repo_owner) return false;
+  if (input.repo_name && repoName !== input.repo_name) return false;
+  const expectedBranch = input.repo_branch ?? input.branch;
+  if (expectedBranch && branch !== expectedBranch) return false;
+  if (input.pr_number && prNumber !== input.pr_number) return false;
+
+  return true;
 }
 
 export async function appendTaskEvent(
@@ -283,26 +338,43 @@ export async function getWorkflowRecord(
 
 export async function claimNextTaskRecord(
   config: AppConfig,
-  input: { agent_id: string; capabilities: AsyncTaskType[]; lease_seconds?: number }
+  input: AsyncTaskClaimInput
 ): Promise<AsyncTask | undefined> {
   const supabase = getSupabaseClient(config);
   const nowIso = now();
   const leaseToken = createId("lease");
   const leaseExpiresAt = new Date(Date.now() + (input.lease_seconds ?? 120) * 1000).toISOString();
 
-  const { data: candidates, error: selectError } = await supabase
+  let query = supabase
     .from("tasks")
     .select("*")
     .in("type", input.capabilities)
     .in("status", ["queued", "leased"])
-    .lte("run_after", nowIso)
+    .lte("run_after", nowIso);
+
+  if (input.task_id) query = query.eq("id", input.task_id);
+  if (input.workflow_id) query = query.eq("workflow_id", input.workflow_id);
+
+  const { data: candidates, error: selectError } = await query
     .order("priority", { ascending: true })
     .order("created_at", { ascending: true })
-    .limit(20);
+    .limit(input.task_id ? 1 : 100);
 
   if (selectError) throw new Error(`Failed to select claimable tasks: ${selectError.message}`);
 
   for (const candidate of (candidates ?? []) as TaskRow[]) {
+    const candidateTask = asTask(candidate);
+
+    const { data: workflowRow, error: workflowError } = await supabase
+      .from("workflows")
+      .select("*")
+      .eq("id", candidate.workflow_id)
+      .maybeSingle();
+    if (workflowError) throw new Error(`Failed to load workflow for claim filtering: ${workflowError.message}`);
+
+    const workflow = workflowRow ? asWorkflow(workflowRow as WorkflowRow) : undefined;
+    if (!taskMatchesClaimFilters(candidateTask, workflow, input)) continue;
+
     if (candidate.status === "leased" && candidate.lease_expires_at && Date.parse(candidate.lease_expires_at) > Date.now()) {
       continue;
     }
@@ -340,7 +412,21 @@ export async function claimNextTaskRecord(
       task_id: updated.id,
       event_type: "task_claimed",
       actor: "agent",
-      data_json: { agent_id: input.agent_id, lease_token: leaseToken, lease_expires_at: leaseExpiresAt }
+      data_json: {
+        agent_id: input.agent_id,
+        lease_token: leaseToken,
+        lease_expires_at: leaseExpiresAt,
+        claim_filters: {
+          task_id: input.task_id,
+          workflow_id: input.workflow_id,
+          repo: input.repo,
+          repo_owner: input.repo_owner,
+          repo_name: input.repo_name,
+          branch: input.branch,
+          repo_branch: input.repo_branch,
+          pr_number: input.pr_number
+        }
+      }
     });
 
     return asTask(updated);
