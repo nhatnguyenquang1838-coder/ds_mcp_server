@@ -37,6 +37,15 @@ function repoInput(match: RegExpMatchArray): { owner: string; repo: string } {
   };
 }
 
+function assertSessionRepo(
+  session: { owner: string; repo: string; session_id: string },
+  repo: { owner: string; repo: string }
+): void {
+  if (session.owner !== repo.owner || session.repo !== repo.repo) {
+    throw new Error(`Upload session does not belong to this repository route: ${session.session_id}`);
+  }
+}
+
 export async function handleGitHubUploadRestApi(
   req: IncomingMessage,
   res: ServerResponse,
@@ -78,8 +87,11 @@ export async function handleGitHubUploadRestApi(
   );
 
   if (req.method === "GET" && sessionMatch) {
+    const repo = repoInput(sessionMatch);
     const sessionId = decodeURIComponent(sessionMatch[3] ?? "");
-    deps.sendJson(res, 200, { ok: true, upload_session: getUploadSession(deps.config, sessionId) });
+    const session = getUploadSession(deps.config, sessionId);
+    assertSessionRepo(session, repo);
+    deps.sendJson(res, 200, { ok: true, upload_session: session });
     return true;
   }
 
@@ -88,8 +100,11 @@ export async function handleGitHubUploadRestApi(
   );
 
   if (req.method === "PUT" && chunkMatch) {
+    const repo = repoInput(chunkMatch);
     const body = uploadChunkSchema.parse(await deps.readJsonBody(req));
     const sessionId = decodeURIComponent(chunkMatch[3] ?? "");
+    const existingSession = getUploadSession(deps.config, sessionId);
+    assertSessionRepo(existingSession, repo);
     const partNumber = Number(chunkMatch[4]);
     const session = uploadSessionChunk(deps.config, {
       session_id: sessionId,
@@ -106,7 +121,10 @@ export async function handleGitHubUploadRestApi(
   );
 
   if (req.method === "POST" && completeMatch) {
+    const repo = repoInput(completeMatch);
     const sessionId = decodeURIComponent(completeMatch[3] ?? "");
+    const existingSession = getUploadSession(deps.config, sessionId);
+    assertSessionRepo(existingSession, repo);
     const session = completeUploadSession(deps.config, sessionId);
 
     writeAuditEvent({
@@ -131,6 +149,7 @@ export async function handleGitHubUploadRestApi(
     const repo = repoInput(commitMatch);
     const sessionId = decodeURIComponent(commitMatch[3] ?? "");
     const session = getUploadSession(deps.config, sessionId);
+    assertSessionRepo(session, repo);
     const content = getCompletedUploadSessionContent(deps.config, sessionId);
     const github = await githubUpsertFile(deps.config, {
       ...repo,
