@@ -840,7 +840,7 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
     return true;
   }
 
-  if (url.pathname.startsWith("/api/") && !isRestAuthorized(req)) {
+  if (url.pathname.startsWith("/api/") && url.pathname !== "/api/webhooks/github" && !isRestAuthorized(req)) {
     setCorsHeaders(res);
     sendJson(res, 401, { error: "Unauthorized" });
     return true;
