@@ -35,6 +35,11 @@ export function evaluateNextTaskType(
   return undefined;
 }
 
+function isWrongTaskClaimFailure(input: TaskResultInput): boolean {
+  const reason = input.error?.reason;
+  return reason === "wrong_task_claimed" || reason === "claim_filter_mismatch" || reason === "claim_target_mismatch";
+}
+
 export async function applyTaskResultTransition(
   config: AppConfig,
   task: AsyncTask,
@@ -52,6 +57,22 @@ export async function applyTaskResultTransition(
   });
 
   if (input.status === "failed") {
+    if (isWrongTaskClaimFailure(input)) {
+      const deadLetterTask = await moveTaskToDeadLetter(config, task, String(input.error?.reason ?? "wrong_task_claimed"), input.error);
+      await updateWorkflowStatus(config, task.workflow_id, "failed", deadLetterTask.id);
+      await appendTaskEvent(config, {
+        workflow_id: task.workflow_id,
+        task_id: task.id,
+        event_type: "workflow_failed",
+        actor: "state_engine",
+        data_json: {
+          reason: input.error?.reason ?? "wrong_task_claimed",
+          retryable: false
+        }
+      });
+      return { task: deadLetterTask };
+    }
+
     const policy = await getRetryPolicyForTaskType(config, task.type, task.max_retries);
 
     if (task.retry_count < policy.max_attempts) {
