@@ -14,6 +14,9 @@ export type AuditAction =
   | "github_close_pr"
   | "github_dispatch_workflow"
   | "github_comment_pr"
+  | "github_create_upload_session"
+  | "github_complete_upload_session"
+  | "github_commit_upload_session"
   | "workspace_agent_trigger"
   | "workspace_agent_callback";
 
