@@ -430,6 +430,7 @@ function getCapabilities() {
       mcp_bearer_token_configured: Boolean(config.mcpBearerToken),
       rest_api_bearer_token_configured: Boolean(config.restApiBearerToken),
       github_token_configured: Boolean(config.githubToken),
+      github_webhook_secret_configured: Boolean(config.githubWebhookSecret),
       workspace_agent_trigger_configured: Boolean(
         config.workspaceAgentTriggerId && config.workspaceAgentToken
       ),
