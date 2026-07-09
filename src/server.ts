@@ -141,7 +141,7 @@ function setCorsHeaders(res: ServerResponse): void {
   res.setHeader("Access-Control-Allow-Methods", "POST, PUT, GET, PATCH, DELETE, OPTIONS");
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "authorization, content-type, mcp-session-id"
+    "authorization, content-type, mcp-session-id, x-github-delivery, x-github-event, x-hub-signature-256"
   );
   res.setHeader("Access-Control-Expose-Headers", "Mcp-Session-Id, Content-Disposition");
 }
