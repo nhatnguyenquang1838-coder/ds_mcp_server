@@ -18,6 +18,10 @@ export type AppConfig = {
   githubDefaultBaseBranch: string;
   githubAllowedBranchPrefixes: string[];
   githubMaxFileBytes: number;
+  dsUploadSessionTtlSeconds: number;
+  dsUploadChunkMaxBytes: number;
+  dsUploadMaxFileBytes: number;
+  dsUploadStorage: string;
   workspaceAgentTriggerId?: string;
   workspaceAgentToken?: string;
   workspaceAgentCallbackToken?: string;
@@ -146,6 +150,10 @@ export function loadConfig(): AppConfig {
       "ai/"
     ]),
     githubMaxFileBytes: readPositiveInteger(process.env.GITHUB_MAX_FILE_BYTES, 1_048_576),
+    dsUploadSessionTtlSeconds: readPositiveInteger(process.env.DS_UPLOAD_SESSION_TTL_SECONDS, 3600),
+    dsUploadChunkMaxBytes: readPositiveInteger(process.env.DS_UPLOAD_CHUNK_MAX_BYTES, 1_048_576),
+    dsUploadMaxFileBytes: readPositiveInteger(process.env.DS_UPLOAD_MAX_FILE_BYTES, 10_485_760),
+    dsUploadStorage: process.env.DS_UPLOAD_STORAGE || "memory",
     workspaceAgentTriggerId: process.env.WORKSPACE_AGENT_TRIGGER_ID || undefined,
     workspaceAgentToken: process.env.WORKSPACE_AGENT_TOKEN || undefined,
     workspaceAgentCallbackToken: process.env.WORKSPACE_AGENT_CALLBACK_TOKEN || undefined,

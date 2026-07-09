@@ -268,6 +268,118 @@ paths:
         "400":
           description: Không thể lấy workflow runs
 
+  /api/github/repos/{owner}/{repo}/upload-sessions:
+    post:
+      summary: Tạo upload session để handoff file theo chunk
+      operationId: githubCreateUploadSession
+      x-openai-isConsequential: true
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubCreateUploadSessionInput"
+      responses:
+        "201":
+          description: Upload session đã tạo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubUploadSessionResponse"
+        "400":
+          description: Không thể tạo upload session
+
+  /api/github/repos/{owner}/{repo}/upload-sessions/{session_id}:
+    get:
+      summary: Đọc trạng thái upload session
+      operationId: githubReadUploadSession
+      x-openai-isConsequential: false
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+        - $ref: "#/components/parameters/UploadSessionId"
+      responses:
+        "200":
+          description: Upload session hiện tại
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubUploadSessionResponse"
+        "400":
+          description: Không thể đọc upload session
+
+  /api/github/repos/{owner}/{repo}/upload-sessions/{session_id}/chunks/{part_number}:
+    put:
+      summary: Upload một chunk base64 vào session
+      operationId: githubUploadSessionChunk
+      x-openai-isConsequential: true
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+        - $ref: "#/components/parameters/UploadSessionId"
+        - name: part_number
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubUploadChunkInput"
+      responses:
+        "200":
+          description: Chunk đã nhận
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubUploadSessionResponse"
+        "400":
+          description: Không thể nhận chunk
+
+  /api/github/repos/{owner}/{repo}/upload-sessions/{session_id}/complete:
+    post:
+      summary: Hoàn tất upload session và kiểm tra checksum
+      operationId: githubCompleteUploadSession
+      x-openai-isConsequential: true
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+        - $ref: "#/components/parameters/UploadSessionId"
+      responses:
+        "200":
+          description: Upload session đã hoàn tất
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubUploadSessionResponse"
+        "400":
+          description: Không thể hoàn tất upload session
+
+  /api/github/repos/{owner}/{repo}/upload-sessions/{session_id}/commit:
+    post:
+      summary: Commit nội dung upload session vào guarded branch
+      operationId: githubCommitUploadSession
+      x-openai-isConsequential: true
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+        - $ref: "#/components/parameters/UploadSessionId"
+      responses:
+        "200":
+          description: Upload session đã commit vào GitHub
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubUploadCommitResponse"
+        "400":
+          description: Không thể commit upload session
+
 components:
   parameters:
     Owner:
@@ -284,6 +396,13 @@ components:
       schema:
         type: string
       example: ds_mcp_server
+    UploadSessionId:
+      name: session_id
+      in: path
+      required: true
+      schema:
+        type: string
+      example: upload_00000000-0000-4000-8000-000000000000
 
   schemas:
     DesignRequest:
@@ -490,6 +609,96 @@ components:
         body:
           type: string
       required: [id, html_url, body]
+
+    GitHubCreateUploadSessionInput:
+      type: object
+      properties:
+        path:
+          type: string
+          example: docs/example.md
+        branch:
+          type: string
+          example: docs/example-branch
+        message:
+          type: string
+          example: docs: add example
+        size_bytes:
+          type: integer
+          minimum: 0
+          example: 12345
+        sha256:
+          type: string
+          pattern: "^[0-9a-fA-F]{64}$"
+      required: [path, branch, message, size_bytes, sha256]
+
+    GitHubUploadChunkInput:
+      type: object
+      properties:
+        content_base64:
+          type: string
+      required: [content_base64]
+
+    GitHubUploadSession:
+      type: object
+      properties:
+        session_id:
+          type: string
+        owner:
+          type: string
+        repo:
+          type: string
+        path:
+          type: string
+        branch:
+          type: string
+        message:
+          type: string
+        size_bytes:
+          type: integer
+        sha256:
+          type: string
+        status:
+          type: string
+          enum: [open, completed, committed, expired]
+        created_at:
+          type: string
+        expires_at:
+          type: string
+        expected_chunks:
+          type: integer
+        uploaded_parts:
+          type: array
+          items:
+            type: integer
+        uploaded_bytes:
+          type: integer
+        completed_at:
+          type: string
+        committed_at:
+          type: string
+        commit_sha:
+          type: string
+      required: [session_id, owner, repo, path, branch, message, size_bytes, sha256, status, created_at, expires_at, expected_chunks, uploaded_parts, uploaded_bytes]
+
+    GitHubUploadSessionResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        upload_session:
+          $ref: "#/components/schemas/GitHubUploadSession"
+      required: [ok, upload_session]
+
+    GitHubUploadCommitResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        upload_session:
+          $ref: "#/components/schemas/GitHubUploadSession"
+        github:
+          $ref: "#/components/schemas/GitHubUpsertFileResponse"
+      required: [ok, upload_session, github]
 
     GitHubWorkflowRuns:
       type: object
