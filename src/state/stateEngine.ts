@@ -1,3 +1,4 @@
+import { isNonRetryableClaimFailureReason } from "../agentops/claimTargeting.js";
 import type { AppConfig } from "../config.js";
 import type { AsyncTask, AsyncTaskType } from "../asyncWorkflowStore.js";
 import {
@@ -35,11 +36,6 @@ export function evaluateNextTaskType(
   return undefined;
 }
 
-function isWrongTaskClaimFailure(input: TaskResultInput): boolean {
-  const reason = input.error?.reason;
-  return reason === "wrong_task_claimed" || reason === "claim_filter_mismatch" || reason === "claim_target_mismatch";
-}
-
 export async function applyTaskResultTransition(
   config: AppConfig,
   task: AsyncTask,
@@ -57,7 +53,7 @@ export async function applyTaskResultTransition(
   });
 
   if (input.status === "failed") {
-    if (isWrongTaskClaimFailure(input)) {
+    if (isNonRetryableClaimFailureReason(input.error?.reason)) {
       const deadLetterTask = await moveTaskToDeadLetter(config, task, String(input.error?.reason ?? "wrong_task_claimed"), input.error);
       await updateWorkflowStatus(config, task.workflow_id, "failed", deadLetterTask.id);
       await appendTaskEvent(config, {
