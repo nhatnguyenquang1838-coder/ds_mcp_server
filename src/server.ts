@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { readFile } from "node:fs/promises";
+import { extname, isAbsolute, relative, resolve } from "node:path";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { ZodError } from "zod";
 import { loadConfig } from "./config.js";
@@ -40,6 +42,7 @@ import { handleGitHubUploadRestApi } from "./githubUploadRouter.js";
 
 const config = loadConfig();
 const serviceVersion = "0.7.0";
+const publicRoot = resolve(process.cwd(), "public");
 
 type UpstreamCallBucket = {
   upstream: string;
@@ -62,6 +65,61 @@ function sendJson(res: ServerResponse, statusCode: number, body: unknown): void 
 function sendHtml(res: ServerResponse, statusCode: number, body: string): void {
   res.writeHead(statusCode, { "content-type": "text/html; charset=utf-8" });
   res.end(body);
+}
+
+function contentTypeForFile(filePath: string): string {
+  switch (extname(filePath).toLowerCase()) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".js":
+      return "application/javascript; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".html":
+      return "text/html; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".txt":
+      return "text/plain; charset=utf-8";
+    default:
+      return "application/octet-stream";
+  }
+}
+
+async function handleAdminStatic(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
+  if (req.method !== "GET" && req.method !== "HEAD") return false;
+  if (url.pathname !== "/admin" && !url.pathname.startsWith("/admin/")) return false;
+
+  const relativePath =
+    url.pathname === "/admin" || url.pathname === "/admin/"
+      ? "admin/index.html"
+      : `admin/${url.pathname.slice("/admin/".length)}`;
+
+  const filePath = resolve(publicRoot, relativePath);
+  const relativeToRoot = relative(publicRoot, filePath);
+  if (relativeToRoot.startsWith("..") || isAbsolute(relativeToRoot)) {
+    sendJson(res, 400, { error: "Invalid admin asset path" });
+    return true;
+  }
+
+  try {
+    const body = await readFile(filePath);
+    res.writeHead(200, {
+      "content-type": contentTypeForFile(filePath),
+      "content-length": String(body.byteLength)
+    });
+
+    if (req.method === "HEAD") {
+      res.end();
+      return true;
+    }
+
+    res.end(body);
+    return true;
+  } catch {
+    sendJson(res, 404, { error: "Admin page not found" });
+    return true;
+  }
 }
 
 function sendBinary(
@@ -867,6 +925,9 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
 const httpServer = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   trackUpstreamCall(req, url);
+
+  const handledAdminStatic = await handleAdminStatic(req, res, url);
+  if (handledAdminStatic) return;
 
   if (req.method === "GET" && url.pathname === "/") {
     return sendJson(res, 200, getCapabilities());
