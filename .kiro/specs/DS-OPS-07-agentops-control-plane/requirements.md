@@ -27,6 +27,8 @@ Non-goals:
 | Agent producer | Agent role that may create workflows when explicitly authorized. |
 | Callback | Optional client-provided webhook target for workflow terminal or attention events. |
 | Needs attention | Workflow/task state that requires operator or agent intervention. |
+| Targeted claim | Async task claim request constrained by task, workflow, repository, branch, or PR metadata instead of capability alone. |
+| Wrong-task claim | A claimed task whose workflow/task context does not match the agent's intended target. |
 
 ## Requirements
 
@@ -133,3 +135,18 @@ Non-goals:
 3. WHEN Supabase is not configured THEN the system SHALL keep existing in-memory behavior for local development.
 4. WHEN new endpoints are added THEN the system SHALL update MCP/REST capabilities or OpenAPI documentation where applicable.
 5. WHEN validation runs THEN `npm run typecheck` and `npm run build` SHALL pass before merge.
+
+### Requirement 9: Targeted Async Task Claim and Wrong-Claim Safety
+
+**User Story:** As an agent worker, I want to claim only the task intended for my workflow, repository, branch, or PR, so that I do not execute work against unrelated queued test workflows.
+
+#### Acceptance Criteria
+
+1. WHEN an agent calls `POST /api/async-tasks/claim` with `task_id` THEN the system SHALL only lease that exact task when it is claimable and compatible with the agent capabilities.
+2. WHEN an agent calls `POST /api/async-tasks/claim` with `workflow_id` THEN the system SHALL only lease claimable tasks under that workflow.
+3. WHEN an agent calls `POST /api/async-tasks/claim` with repository filters THEN the system SHALL match against merged workflow context and task payload metadata.
+4. WHEN repository filters include `repo`, `repo_owner`, `repo_name`, `branch`, `repo_branch`, or `pr_number` THEN the system SHALL NOT lease tasks whose merged context does not match those filters.
+5. WHEN no queued or expired-lease task matches the supplied claim filters THEN the system SHALL return no claimed task instead of falling back to unrelated capability-only matches.
+6. WHEN a task result fails with reason `wrong_task_claimed`, `claim_filter_mismatch`, or `claim_target_mismatch` THEN the system SHALL treat the failure as non-retryable and move the task to `dead_letter` rather than requeueing it.
+7. WHEN a targeted claim succeeds THEN the system SHALL write the supplied claim filters into the `task_claimed` audit event.
+8. WHEN Supabase is configured or memory fallback is used THEN the system SHALL apply the same targeted claim semantics where practical.
