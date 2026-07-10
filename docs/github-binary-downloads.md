@@ -23,7 +23,7 @@ GET /api/github/repos/{owner}/{repo}/actions/runs/{run_id}/artifacts
 Example:
 
 ```bash
-curl "https://ds-mcp-server-theta.vercel.app/api/github/repos/nhatnguyenquang1838-coder/ds_mcp_server/actions/runs/123456/artifacts"
+curl "https://ds-mcp-server-one.vercel.app/api/github/repos/dw18031988/ds_mcp_server/actions/runs/123456/artifacts"
 ```
 
 ### Download workflow artifact ZIP
@@ -37,7 +37,7 @@ This endpoint returns `application/zip` and a `Content-Disposition` attachment f
 Example:
 
 ```bash
-curl -L -o artifact.zip "https://ds-mcp-server-theta.vercel.app/api/github/repos/nhatnguyenquang1838-coder/ds_mcp_server/actions/artifacts/987654/zip"
+curl -L -o artifact.zip "https://ds-mcp-server-one.vercel.app/api/github/repos/dw18031988/ds_mcp_server/actions/artifacts/987654/zip"
 ```
 
 ### Download repo archive ZIP
@@ -51,7 +51,7 @@ This endpoint returns a zipball for a branch, tag, or commit ref.
 Example:
 
 ```bash
-curl -L -o repo-main.zip "https://ds-mcp-server-theta.vercel.app/api/github/repos/nhatnguyenquang1838-coder/ds_mcp_server/archive?ref=main"
+curl -L -o repo-main.zip "https://ds-mcp-server-one.vercel.app/api/github/repos/dw18031988/ds_mcp_server/archive?ref=main"
 ```
 
 ## MCP tools
@@ -62,7 +62,7 @@ Input:
 
 ```json
 {
-  "owner": "nhatnguyenquang1838-coder",
+  "owner": "dw18031988",
   "repo": "ds_mcp_server",
   "run_id": 123456,
   "per_page": 30
@@ -77,7 +77,7 @@ Input:
 
 ```json
 {
-  "owner": "nhatnguyenquang1838-coder",
+  "owner": "dw18031988",
   "repo": "ds_mcp_server",
   "artifact_id": 987654
 }
@@ -101,7 +101,7 @@ Input:
 
 ```json
 {
-  "owner": "nhatnguyenquang1838-coder",
+  "owner": "dw18031988",
   "repo": "ds_mcp_server",
   "ref": "main"
 }

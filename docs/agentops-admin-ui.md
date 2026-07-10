@@ -7,7 +7,7 @@ This adds a lightweight browser UI for the AgentOps task workflow.
 After deployment, open:
 
 ```text
-https://ds-mcp-server-theta.vercel.app/admin/
+https://ds-mcp-server-one.vercel.app/admin/
 ```
 
 The UI is a static app under:

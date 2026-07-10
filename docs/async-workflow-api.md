@@ -52,7 +52,7 @@ POST /api/async-tasks/{task_id}/result
   "status": "succeeded",
   "summary": "PR created",
   "artifacts": {
-    "repo": "nhatnguyenquang1838-coder/ds_mcp_server",
+    "repo": "dw18031988/ds_mcp_server",
     "pr_number": 14,
     "head_sha": "abc123"
   }
@@ -68,7 +68,7 @@ POST /api/webhooks/github
 ```json
 {
   "delivery_id": "github-delivery-id",
-  "repo": "nhatnguyenquang1838-coder/ds_mcp_server",
+  "repo": "dw18031988/ds_mcp_server",
   "pr_number": 14,
   "head_sha": "abc123",
   "conclusion": "success"

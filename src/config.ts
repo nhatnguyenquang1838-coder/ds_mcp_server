@@ -1,4 +1,5 @@
 export type RuntimeMode = "local" | "development" | "staging" | "production";
+export type SecurityEnforcement = "relaxed" | "strict";
 
 export type DatabaseProfile = {
   target: string;
@@ -31,6 +32,11 @@ export type AppConfig = {
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
   runtimeMode: RuntimeMode;
+  securityEnforcement: SecurityEnforcement;
+  corsAllowedOrigins: string[];
+  maxJsonBodyBytes: number;
+  rateLimitWindowMs: number;
+  rateLimitMaxRequests: number;
   activeDbTarget: string;
   devToolsEnabled: boolean;
   devToolsAllowRealDbSwitch: boolean;
@@ -66,6 +72,34 @@ function readCsv(value: string | undefined, fallback: string[] = []): string[] {
 function readBoolean(value: string | undefined, fallback = false): boolean {
   if (!value) return fallback;
   return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+
+function readSecurityEnforcement(value: string | undefined): SecurityEnforcement {
+  const fallback: SecurityEnforcement = process.env.NODE_ENV === "production" ? "strict" : "relaxed";
+  if (!value) return fallback;
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "relaxed" || normalized === "strict") {
+    return normalized;
+  }
+
+  throw new Error(`Invalid SECURITY_ENFORCEMENT: ${value}`);
+}
+
+function readOrigins(value: string | undefined): string[] {
+  if (!value) return [];
+
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((origin) => {
+      try {
+        return new URL(origin).origin;
+      } catch {
+        throw new Error(`Invalid CORS_ALLOWED_ORIGINS entry: ${origin}`);
+      }
+    });
 }
 
 function readRuntimeMode(value: string | undefined): RuntimeMode {
@@ -132,6 +166,8 @@ export function loadConfig(): AppConfig {
   const databaseProfiles = createDatabaseProfiles();
   const activeDbTarget = process.env.SUPABASE_ACTIVE_DB_TARGET || process.env.DB_TARGET || "default";
   const activeProfile = activeDatabaseProfile(databaseProfiles, activeDbTarget);
+  const securityEnforcement = readSecurityEnforcement(process.env.SECURITY_ENFORCEMENT);
+  const corsAllowedOrigins = readOrigins(process.env.CORS_ALLOWED_ORIGINS);
 
   return {
     port: readPort(process.env.PORT),
@@ -165,6 +201,11 @@ export function loadConfig(): AppConfig {
     supabaseUrl: activeProfile.supabaseUrl,
     supabaseServiceRoleKey: activeProfile.supabaseServiceRoleKey,
     runtimeMode: readRuntimeMode(process.env.APP_RUNTIME_MODE),
+    securityEnforcement,
+    corsAllowedOrigins,
+    maxJsonBodyBytes: readPositiveInteger(process.env.MAX_JSON_BODY_BYTES, 1_048_576),
+    rateLimitWindowMs: readPositiveInteger(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
+    rateLimitMaxRequests: readPositiveInteger(process.env.RATE_LIMIT_MAX_REQUESTS, 120),
     activeDbTarget,
     devToolsEnabled: readBoolean(process.env.DEV_TOOLS_ENABLED),
     devToolsAllowRealDbSwitch: readBoolean(process.env.DEV_TOOLS_ALLOW_REAL_DB_SWITCH),

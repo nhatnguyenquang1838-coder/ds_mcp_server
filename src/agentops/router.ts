@@ -47,6 +47,7 @@ import {
   parseGithubWebhookBody,
   verifyGithubWebhookSignature
 } from "./githubWebhook.js";
+import { PayloadTooLargeError } from "../security/requestLimits.js";
 
 export type AgentOpsRouterDeps = {
   config: AppConfig;
@@ -391,6 +392,11 @@ export async function handleAgentOpsRestApi(
     sendJson(res, 404, { error: "AgentOps task route not found" });
     return true;
   } catch (error) {
+    if (error instanceof PayloadTooLargeError) {
+      sendJson(res, 413, { error: error.message });
+      return true;
+    }
+
     if (error instanceof SyntaxError) {
       sendJson(res, 400, { error: "Invalid JSON body" });
       return true;

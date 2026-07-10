@@ -355,6 +355,27 @@ h3 {
 }
 
 @media (max-width: 860px) {
+  .topbar {
+    gap: 14px;
+  }
+
+  .topbar-actions {
+    width: 100%;
+  }
+
+  .layout {
+    padding: 12px;
+  }
+
+  .panel {
+    padding: 16px;
+  }
+
+  .panel-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .topbar,
   .topbar-actions,
   .layout,
@@ -366,5 +387,88 @@ h3 {
   .topbar {
     align-items: stretch;
     display: grid;
+  }
+
+  .task-title {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .task-title strong {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .meta-row {
+    gap: 6px 10px;
+  }
+
+  .kv {
+    gap: 4px;
+    grid-template-columns: 1fr;
+  }
+
+  .transition-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .transition-grid button {
+    width: 100%;
+  }
+
+  .empty-state {
+    min-height: 220px;
+  }
+}
+
+@media (max-width: 540px) {
+  .topbar {
+    padding: 14px;
+  }
+
+  .topbar-actions,
+  .filters,
+  .grid-2,
+  .transition-grid,
+  .metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .layout {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .panel {
+    border-radius: 16px;
+    padding: 14px;
+  }
+
+  h1 {
+    font-size: 22px;
+  }
+
+  h2 {
+    font-size: 18px;
+  }
+
+  .panel-heading {
+    margin-bottom: 12px;
+  }
+
+  .filters input,
+  .filters select,
+  .topbar-actions input,
+  .topbar-actions button,
+  .transition-grid button {
+    width: 100%;
+  }
+
+  .toast {
+    left: 10px;
+    max-width: none;
+    right: 10px;
+    transform: none;
   }
 }

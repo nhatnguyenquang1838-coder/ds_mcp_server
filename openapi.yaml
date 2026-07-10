@@ -6,11 +6,15 @@ info:
   description: REST wrapper cho Design System Review Agent và GitHub gateway. Không gọi trực tiếp MCP /mcp.
 
 servers:
-  - url: https://ds-mcp-server-theta.vercel.app
+  - url: https://ds-mcp-server-one.vercel.app
+
+security:
+  - bearerAuth: []
 
 paths:
   /health:
     get:
+      security: []
       summary: Kiểm tra server còn sống
       operationId: healthCheck
       x-openai-isConsequential: false
@@ -26,6 +30,34 @@ paths:
                     type: boolean
                 required:
                   - ok
+
+  /api/capabilities:
+    get:
+      security: []
+      summary: Xem capability và guardrail hiện tại
+      operationId: getCapabilities
+      x-openai-isConsequential: false
+      responses:
+        "200":
+          description: Danh sách capability
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  service:
+                    type: string
+                  version:
+                    type: string
+                  mcp_path:
+                    type: string
+                required:
+                  - ok
+                  - service
+                  - version
+                  - mcp_path
 
   /api/design-requests/{request_id}:
     get:
@@ -381,6 +413,12 @@ paths:
           description: Không thể commit upload session
 
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: DS_API_TOKEN
+
   parameters:
     Owner:
       name: owner
@@ -388,7 +426,7 @@ components:
       required: true
       schema:
         type: string
-      example: nhatnguyenquang1838-coder
+      example: dw18031988
     Repo:
       name: repo
       in: path
