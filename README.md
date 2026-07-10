@@ -45,6 +45,7 @@ REST endpoints for GPT Actions:
 | `POST` | `/api/github/repos/{owner}/{repo}/pull-requests` | Create PR |
 | `POST` | `/api/github/repos/{owner}/{repo}/pull-requests/{pr_number}/comments` | Comment PR |
 | `GET` | `/api/github/repos/{owner}/{repo}/workflow-runs` | Read workflow runs |
+| `GET` | `/api/diagnostics/url-map` | Read safe URL and route diagnostics |
 
 ## Production URL map
 
