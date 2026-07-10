@@ -270,7 +270,7 @@ ngrok http 8787
 Use the public MCP endpoint in ChatGPT:
 
 ```text
-https://<your-ngrok-domain>/mcp
+https://<your-ngrok-domain>/mcp/<MCP_URL_SECRET>
 ```
 
 ## ChatGPT MCP connector setup
@@ -289,7 +289,8 @@ Use:
 
 ```text
 Name: Design System MCP
-URL: https://<your-public-domain>/mcp
+URL: https://<your-public-domain>/mcp/<MCP_URL_SECRET>
+Authentication: No Authentication
 ```
 
 ## Custom GPT Actions setup
@@ -324,11 +325,27 @@ curl -H "Authorization: Bearer <REST_API_BEARER_TOKEN>" https://<your-public-dom
 
 If the second call returns `401`, verify the bearer token matches the Vercel production environment variable exactly.
 
-## Optional bearer auth
+## MCP auth options
 
-For local prototype, `MCP_BEARER_TOKEN` may be empty.
+For ChatGPT MCP connector, use the path-secret flow:
 
-Before exposing to the internet, set:
+```env
+MCP_URL_SECRET=replace-with-a-long-random-secret
+```
+
+Then the connector URL becomes:
+
+```text
+https://<your-public-domain>/mcp/<MCP_URL_SECRET>
+```
+
+Authentication in ChatGPT:
+
+```text
+No Authentication
+```
+
+For local tools like MCP Inspector, you can still use bearer auth:
 
 ```env
 MCP_BEARER_TOKEN=replace-with-a-long-random-token
@@ -340,7 +357,7 @@ Then MCP clients must send:
 Authorization: Bearer replace-with-a-long-random-token
 ```
 
-The REST wrapper now enforces `REST_API_BEARER_TOKEN` for sensitive routes in production. Keep `GET /health` public, and use `GET /api/capabilities` only for connector smoke tests.
+The REST wrapper still enforces `REST_API_BEARER_TOKEN` for sensitive routes in production. Keep `GET /health` public, and use `GET /api/capabilities` only for connector smoke tests.
 
 ## Backend result forwarding
 
@@ -372,7 +389,7 @@ npm start          # run compiled server
 
 Minimum controls before production:
 
-- Set `MCP_BEARER_TOKEN` or implement OAuth for MCP.
+- Set `MCP_URL_SECRET` for ChatGPT MCP connector or `MCP_BEARER_TOKEN` for direct MCP clients.
 - Add auth for REST endpoints before using real data.
 - Keep write tools narrow and schema-validated.
 - Do not expose destructive tools in MVP.

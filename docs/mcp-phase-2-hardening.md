@@ -28,6 +28,28 @@ GET /api/capabilities
 
 `GET /api/capabilities` stays public for connector/tool debugging and does not expose secrets.
 
+## MCP connector behavior
+
+For ChatGPT MCP connectors, use a capability URL secret instead of static bearer auth:
+
+```env
+MCP_URL_SECRET=replace-with-a-long-random-secret
+```
+
+Connector URL:
+
+```text
+https://ds-mcp-server-one.vercel.app/mcp/<MCP_URL_SECRET>
+```
+
+Connector auth:
+
+```text
+No Authentication
+```
+
+For local debugging, `MCP_BEARER_TOKEN` can still be used with MCP Inspector and other direct clients.
+
 ## Capability check
 
 ```bash

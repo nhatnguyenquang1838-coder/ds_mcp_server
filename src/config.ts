@@ -11,6 +11,7 @@ export type AppConfig = {
   port: number;
   mcpPath: string;
   mcpBearerToken?: string;
+  mcpUrlSecret?: string;
   restApiBearerToken?: string;
   designSystemBackendUrl?: string;
   internalAgentResultToken?: string;
@@ -173,6 +174,7 @@ export function loadConfig(): AppConfig {
     port: readPort(process.env.PORT),
     mcpPath: process.env.MCP_PATH || "/mcp",
     mcpBearerToken: process.env.MCP_BEARER_TOKEN || undefined,
+    mcpUrlSecret: process.env.MCP_URL_SECRET || undefined,
     restApiBearerToken: process.env.REST_API_BEARER_TOKEN || undefined,
     designSystemBackendUrl: process.env.DS_BACKEND_URL || undefined,
     internalAgentResultToken: process.env.INTERNAL_AGENT_RESULT_TOKEN || undefined,

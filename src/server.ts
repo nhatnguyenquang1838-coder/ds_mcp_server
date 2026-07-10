@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { ZodError } from "zod";
@@ -124,6 +124,41 @@ function setSecurityHeaders(res: ServerResponse): void {
 
 function firstHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function hashForComparison(value: string): Buffer {
+  return createHash("sha256").update(value, "utf8").digest();
+}
+
+function secretsMatch(expected: string, actual: string): boolean {
+  const expectedHash = hashForComparison(expected);
+  const actualHash = hashForComparison(actual);
+  if (expectedHash.length !== actualHash.length) return false;
+  return timingSafeEqual(expectedHash, actualHash);
+}
+
+function normalizeMcpPath(mcpPath: string): string {
+  if (!mcpPath || mcpPath === "/") return "/";
+  return mcpPath.replace(/\/+$/, "");
+}
+
+function mcpUrlSecretFromPathname(mcpPath: string, pathname: string): string | undefined {
+  const normalizedMcpPath = normalizeMcpPath(mcpPath);
+  if (normalizedMcpPath === "/") return undefined;
+
+  const prefix = `${normalizedMcpPath}/`;
+  if (!pathname.startsWith(prefix)) return undefined;
+
+  const encodedSecret = pathname.slice(prefix.length);
+  if (!encodedSecret || encodedSecret.includes("/")) return undefined;
+
+  return decodeURIComponent(encodedSecret);
+}
+
+function isMcpRequestPath(mcpPath: string, pathname: string): boolean {
+  const normalizedMcpPath = normalizeMcpPath(mcpPath);
+  if (pathname === normalizedMcpPath) return true;
+  return mcpUrlSecretFromPathname(normalizedMcpPath, pathname) !== undefined;
 }
 
 function requestId(req: IncomingMessage): string {
@@ -449,6 +484,7 @@ function getCapabilities() {
       enforcement: config.securityEnforcement,
       startup_validated: securityStartup.ok,
       cors_allowed_origins: config.securityEnforcement === "strict" ? config.corsAllowedOrigins : ["*"],
+      mcp_url_secret_configured: Boolean(config.mcpUrlSecret),
       max_json_body_bytes: config.maxJsonBodyBytes,
       rate_limit_window_ms: config.rateLimitWindowMs,
       rate_limit_max_requests: config.rateLimitMaxRequests
@@ -508,6 +544,7 @@ function getCapabilities() {
     },
     auth: {
       mcp_bearer_token_configured: Boolean(config.mcpBearerToken),
+      mcp_url_secret_configured: Boolean(config.mcpUrlSecret),
       rest_api_bearer_token_configured: Boolean(config.restApiBearerToken),
       github_token_configured: Boolean(config.githubToken),
       github_webhook_secret_configured: Boolean(config.githubWebhookSecret),
@@ -533,13 +570,49 @@ async function enforceSecurity(
   url: URL
 ): Promise<SecurityContext | null> {
   const method = req.method || "GET";
-  const securityRoute = resolveRoutePolicy(method, url.pathname);
   const requestIdValue = requestId(req);
   const origin = firstHeader(req.headers.origin);
 
   res.setHeader("X-Request-Id", requestIdValue);
   setSecurityHeaders(res);
   setCorsHeaders(req, res);
+
+  const mcpUrlSecret = mcpUrlSecretFromPathname(config.mcpPath, url.pathname);
+  if (mcpUrlSecret) {
+    if (method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return null;
+    }
+
+    if (config.securityEnforcement === "strict" && origin && !isAllowedOrigin(origin)) {
+      logSecurityDenial({
+        requestId: requestIdValue,
+        routeId: "mcp.connector_secret",
+        principalType: "public",
+        status: 403,
+        reason: "origin_not_allowed",
+        method,
+        pathname: url.pathname
+      });
+      sendDenied(res, req, 403, "Origin not allowed");
+      return null;
+    }
+
+    if (!config.mcpUrlSecret || !secretsMatch(config.mcpUrlSecret, mcpUrlSecret)) {
+      sendJson(res, 404, { error: "Not found", request_id: requestIdValue }, { "X-Request-Id": requestIdValue });
+      return null;
+    }
+
+    return {
+      requestId: requestIdValue,
+      routeId: "mcp.connector_secret",
+      principalType: "mcp_url_secret",
+      principalId: "path-secret"
+    };
+  }
+
+  const securityRoute = resolveRoutePolicy(method, url.pathname);
 
   if (securityRoute.sensitive && origin && config.securityEnforcement === "strict" && !isAllowedOrigin(origin)) {
     logSecurityDenial({
@@ -565,6 +638,11 @@ async function enforceSecurity(
   ) {
     res.writeHead(204);
     res.end();
+    return null;
+  }
+
+  if (url.pathname === config.mcpPath && config.mcpUrlSecret && !config.mcpBearerToken) {
+    sendJson(res, 404, { error: "Not found", request_id: requestIdValue }, { "X-Request-Id": requestIdValue });
     return null;
   }
 
@@ -1141,7 +1219,7 @@ const httpServer = createServer(async (req, res) => {
   const handledRestApi = await handleRestApi(req, res, url);
   if (handledRestApi) return;
 
-  if (url.pathname !== config.mcpPath) {
+  if (!isMcpRequestPath(config.mcpPath, url.pathname)) {
     return sendJson(res, 404, { error: "Not found", request_id: securityContext.requestId }, { "X-Request-Id": securityContext.requestId });
   }
 

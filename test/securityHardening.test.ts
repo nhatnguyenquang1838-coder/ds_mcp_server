@@ -40,6 +40,12 @@ test("resolves unknown api routes as disabled", () => {
   assert.equal(policy.sensitive, true);
 });
 
+test("treats mcp path secret routes as disabled without explicit server handling", () => {
+  const policy = resolveRoutePolicy("POST", "/mcp/secret-value");
+  assert.equal(policy.policy, "disabled");
+  assert.equal(policy.sensitive, true);
+});
+
 test("returns 401 for mismatched bearer tokens and 403 for disabled routes", () => {
   const config = baseConfig();
   const unauthorized = authorizeRoute(

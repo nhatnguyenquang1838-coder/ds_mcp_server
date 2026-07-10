@@ -6,6 +6,7 @@ export type SecurityStartupSummary = {
   runtimeMode: AppConfig["runtimeMode"];
   restBearerConfigured: boolean;
   mcpBearerConfigured: boolean;
+  mcpUrlSecretConfigured: boolean;
   webhookSecretConfigured: boolean;
   internalCallbackConfigured: boolean;
   supabaseConfigured: boolean;
@@ -25,6 +26,7 @@ export function summarizeSecurityConfig(config: AppConfig): SecurityStartupSumma
     runtimeMode: config.runtimeMode,
     restBearerConfigured: Boolean(config.restApiBearerToken),
     mcpBearerConfigured: Boolean(config.mcpBearerToken),
+    mcpUrlSecretConfigured: Boolean(config.mcpUrlSecret),
     webhookSecretConfigured: Boolean(config.githubWebhookSecret),
     internalCallbackConfigured: Boolean(config.workspaceAgentCallbackToken),
     supabaseConfigured: Boolean(config.supabaseUrl && config.supabaseServiceRoleKey),
@@ -45,7 +47,11 @@ export function validateSecurityStartup(config: AppConfig): {
 
   if (config.securityEnforcement === "strict") {
     addIssue(issues, Boolean(config.restApiBearerToken), "REST_API_BEARER_TOKEN is required");
-    addIssue(issues, Boolean(config.mcpBearerToken), "MCP_BEARER_TOKEN is required");
+    addIssue(
+      issues,
+      Boolean(config.mcpBearerToken || config.mcpUrlSecret),
+      "MCP_BEARER_TOKEN or MCP_URL_SECRET is required"
+    );
     addIssue(issues, Boolean(config.githubWebhookSecret), "GITHUB_WEBHOOK_SECRET is required");
     addIssue(issues, summary.supabaseConfigured, "Supabase configuration is required");
     addIssue(issues, config.corsAllowedOrigins.length > 0, "CORS_ALLOWED_ORIGINS is required");

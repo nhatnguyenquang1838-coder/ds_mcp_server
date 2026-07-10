@@ -72,6 +72,10 @@ export function resolveRoutePolicy(method: string, pathname: string): ResolvedRo
     return { routeId: "mcp.streamable", policy: "mcp_bearer", sensitive: true };
   }
 
+  if (pathname.startsWith("/mcp/")) {
+    return { routeId: "mcp.connector_secret", policy: "disabled", sensitive: true };
+  }
+
   if (/^\/internal\/agent-runs\/[^/]+\/result$/.test(pathname)) {
     return { routeId: "internal.agent_run_result", policy: "internal_token", sensitive: true };
   }
