@@ -1,0 +1,37 @@
+[
+  {
+    "code": "SEC-MCP-01",
+    "title": "Enforce fail-closed route security and production perimeter",
+    "priority": "P0",
+    "spec": ".kiro/specs/SEC-MCP-01-security-hardening/",
+    "issue_file": "issues/SEC-MCP-01-enforce-fail-closed-route-security-and-production-perimeter.md"
+  },
+  {
+    "code": "SEC-WEB-02",
+    "title": "Add Supabase admin authentication and RBAC",
+    "priority": "P1",
+    "spec": ".kiro/specs/SEC-WEB-02-admin-auth-rbac/",
+    "issue_file": "issues/SEC-WEB-02-add-supabase-admin-authentication-and-rbac.md"
+  },
+  {
+    "code": "SEC-AGENT-01",
+    "title": "Add scoped, hashed, revocable agent API keys",
+    "priority": "P1",
+    "spec": ".kiro/specs/SEC-AGENT-01-scoped-api-keys/",
+    "issue_file": "issues/SEC-AGENT-01-add-scoped-hashed-revocable-agent-api-keys.md"
+  },
+  {
+    "code": "SEC-HTTP-01",
+    "title": "Harden browser and API traffic with headers and distributed rate limits",
+    "priority": "P2",
+    "spec": ".kiro/specs/SEC-HTTP-01-browser-api-hardening/",
+    "issue_file": "issues/SEC-HTTP-01-harden-browser-and-api-traffic-with-headers-and-distributed-rate-limits.md"
+  },
+  {
+    "code": "SEC-OPS-01",
+    "title": "Add durable security audit, posture monitoring, and incident signals",
+    "priority": "P2",
+    "spec": ".kiro/specs/SEC-OPS-01-security-audit-monitoring/",
+    "issue_file": "issues/SEC-OPS-01-add-durable-security-audit-posture-monitoring-and-incident-signals.md"
+  }
+]

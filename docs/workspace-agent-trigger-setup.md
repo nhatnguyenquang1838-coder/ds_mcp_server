@@ -19,7 +19,7 @@ Business backend
 Set these values in the hosting environment:
 
 ```env
-PUBLIC_BASE_URL=https://ds-mcp-server-theta.vercel.app
+PUBLIC_BASE_URL=https://ds-mcp-server-one.vercel.app
 WORKSPACE_AGENT_TRIGGER_ID=agtch_xxx
 WORKSPACE_AGENT_TOKEN=<workspace-agent-bearer-value>
 WORKSPACE_AGENT_CALLBACK_TOKEN=<long-random-callback-value>
@@ -74,7 +74,7 @@ info:
   title: Workspace Agent Callback API
   version: 1.0.0
 servers:
-  - url: https://ds-mcp-server-theta.vercel.app
+  - url: https://ds-mcp-server-one.vercel.app
 paths:
   /internal/agent-runs/{run_id}/result:
     post:

@@ -1,0 +1,493 @@
+openapi: 3.1.0
+info:
+  title: DS MCP Custom Agent API
+  version: 2.0.0
+  description: Secure REST wrapper for Custom GPT Actions. Sensitive routes require Bearer auth.
+servers:
+  - url: https://ds-mcp-server-one.vercel.app
+security:
+  - bearerAuth: []
+tags:
+  - name: Health
+  - name: Capabilities
+  - name: Design Requests
+  - name: Agent Results
+  - name: GitHub Gateway
+
+paths:
+  /health:
+    get:
+      security: []
+      tags: [Health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/capabilities:
+    get:
+      security: []
+      tags: [Capabilities]
+      summary: Inspect service capabilities and security posture
+      operationId: getCapabilities
+      responses:
+        "200":
+          description: Capability payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CapabilitiesResponse"
+
+  /api/design-requests/{request_id}:
+    get:
+      tags: [Design Requests]
+      summary: Fetch a design request by id
+      operationId: getDesignRequest
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+      responses:
+        "200":
+          description: Design request response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DesignRequest"
+        "404":
+          description: Design request not found
+
+  /api/agent-results:
+    post:
+      tags: [Agent Results]
+      summary: Submit an agent result
+      operationId: submitAgentResult
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentResultInput"
+      responses:
+        "200":
+          description: Result accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentResultResponse"
+        "400":
+          description: Invalid payload
+
+  /api/github/repos/{owner}/{repo}:
+    get:
+      tags: [GitHub Gateway]
+      summary: Read repository metadata
+      operationId: githubGetRepo
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+      responses:
+        "200":
+          description: Repository metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubRepo"
+
+  /api/github/repos/{owner}/{repo}/files:
+    get:
+      tags: [GitHub Gateway]
+      summary: Read a UTF-8 file from a repository
+      operationId: githubReadFile
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: ref
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubFile"
+
+    post:
+      tags: [GitHub Gateway]
+      summary: Create or update a file in an allowed repo
+      operationId: githubUpsertFile
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubUpsertFileInput"
+      responses:
+        "200":
+          description: File updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubUpsertFileResponse"
+
+  /api/github/repos/{owner}/{repo}/branches:
+    post:
+      tags: [GitHub Gateway]
+      summary: Create a guarded branch
+      operationId: githubCreateBranch
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubCreateBranchInput"
+      responses:
+        "200":
+          description: Branch created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubBranch"
+
+  /api/github/repos/{owner}/{repo}/pull-requests:
+    post:
+      tags: [GitHub Gateway]
+      summary: Open a pull request
+      operationId: githubCreatePullRequest
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubCreatePullRequestInput"
+      responses:
+        "200":
+          description: Pull request created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubPullRequest"
+
+  /api/github/repos/{owner}/{repo}/pull-requests/{pr_number}/comments:
+    post:
+      tags: [GitHub Gateway]
+      summary: Comment on a pull request
+      operationId: githubCommentPullRequest
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+        - name: pr_number
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GitHubCommentInput"
+      responses:
+        "200":
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubComment"
+
+  /api/github/repos/{owner}/{repo}/workflow-runs:
+    get:
+      tags: [GitHub Gateway]
+      summary: List recent workflow runs
+      operationId: githubGetWorkflowRuns
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+        - name: branch
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: per_page
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 30
+      responses:
+        "200":
+          description: Workflow runs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubWorkflowRuns"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: DS_API_TOKEN
+
+  parameters:
+    Owner:
+      name: owner
+      in: path
+      required: true
+      schema:
+        type: string
+    Repo:
+      name: repo
+      in: path
+      required: true
+      schema:
+        type: string
+    RequestId:
+      name: request_id
+      in: path
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
+
+    CapabilitiesResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        service:
+          type: string
+        version:
+          type: string
+        mcp_path:
+          type: string
+        auth:
+          type: object
+      required: [ok, service, version, mcp_path]
+
+    DesignRequest:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        project:
+          type: string
+        status:
+          type: string
+        requirement:
+          type: string
+      required: [id, title, project, status, requirement]
+
+    FrontendTask:
+      type: object
+      properties:
+        title:
+          type: string
+        acceptance_criteria:
+          type: array
+          items:
+            type: string
+      required: [title, acceptance_criteria]
+
+    AgentResultInput:
+      type: object
+      properties:
+        request_id:
+          type: string
+        decision:
+          type: string
+          enum: [approve, revise, reject]
+        summary:
+          type: string
+        risk_level:
+          type: string
+          enum: [low, medium, high]
+        frontend_tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/FrontendTask"
+        validation:
+          type: array
+          items:
+            type: string
+      required: [request_id, decision, summary, risk_level, frontend_tasks, validation]
+
+    AgentResultResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        request_id:
+          type: string
+        stored:
+          type: boolean
+        forwarded_to_backend:
+          type: boolean
+        backend_status:
+          type: integer
+      required: [ok, request_id, stored, forwarded_to_backend]
+
+    GitHubRepo:
+      type: object
+      properties:
+        full_name:
+          type: string
+        private:
+          type: boolean
+        default_branch:
+          type: string
+        html_url:
+          type: string
+      required: [full_name, private, default_branch, html_url]
+
+    GitHubFile:
+      type: object
+      properties:
+        owner:
+          type: string
+        repo:
+          type: string
+        path:
+          type: string
+        ref:
+          type: string
+        sha:
+          type: string
+        content:
+          type: string
+        encoding:
+          type: string
+      required: [owner, repo, path, content, encoding]
+
+    GitHubUpsertFileInput:
+      type: object
+      properties:
+        path:
+          type: string
+        content:
+          type: string
+        branch:
+          type: string
+        message:
+          type: string
+      required: [path, content, branch, message]
+
+    GitHubUpsertFileResponse:
+      type: object
+      properties:
+        owner:
+          type: string
+        repo:
+          type: string
+        path:
+          type: string
+        branch:
+          type: string
+        sha:
+          type: string
+      required: [owner, repo, path, branch, sha]
+
+    GitHubCreateBranchInput:
+      type: object
+      properties:
+        branch:
+          type: string
+        from_branch:
+          type: string
+      required: [branch]
+
+    GitHubBranch:
+      type: object
+      properties:
+        owner:
+          type: string
+        repo:
+          type: string
+        branch:
+          type: string
+        from_branch:
+          type: string
+        ref:
+          type: string
+      required: [owner, repo, branch]
+
+    GitHubCreatePullRequestInput:
+      type: object
+      properties:
+        title:
+          type: string
+        head:
+          type: string
+        base:
+          type: string
+        body:
+          type: string
+        draft:
+          type: boolean
+      required: [title, head]
+
+    GitHubPullRequest:
+      type: object
+      properties:
+        number:
+          type: integer
+        html_url:
+          type: string
+      required: [number, html_url]
+
+    GitHubCommentInput:
+      type: object
+      properties:
+        body:
+          type: string
+      required: [body]
+
+    GitHubComment:
+      type: object
+      properties:
+        id:
+          type: integer
+        html_url:
+          type: string
+      required: [id, html_url]
+
+    GitHubWorkflowRuns:
+      type: object
+      properties:
+        total_count:
+          type: integer
+        workflow_runs:
+          type: array
+          items:
+            type: object
+      required: [total_count, workflow_runs]

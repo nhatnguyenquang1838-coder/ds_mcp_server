@@ -4,7 +4,7 @@ This phase adds safety and production-readiness controls around the Design Syste
 
 ## Changes
 
-- Optional REST API bearer auth using `REST_API_BEARER_TOKEN`.
+- REST API bearer auth using `REST_API_BEARER_TOKEN` for sensitive routes.
 - Public capability endpoint at `GET /api/capabilities`.
 - Zod validation for GitHub REST write payloads.
 - Audit log events for REST and MCP write actions.
@@ -13,26 +13,25 @@ This phase adds safety and production-readiness controls around the Design Syste
 
 ## REST auth behavior
 
-If `REST_API_BEARER_TOKEN` is not set, REST behavior remains backward-compatible.
-
-If `REST_API_BEARER_TOKEN` is set, all `/api/*` routes require:
+Sensitive REST routes require:
 
 ```http
 Authorization: Bearer <REST_API_BEARER_TOKEN>
 ```
 
-Exception:
+Public exceptions:
 
 ```text
+GET /health
 GET /api/capabilities
 ```
 
-This endpoint stays public for connector/tool debugging and does not expose secrets.
+`GET /api/capabilities` stays public for connector/tool debugging and does not expose secrets.
 
 ## Capability check
 
 ```bash
-curl https://ds-mcp-server-theta.vercel.app/api/capabilities
+curl https://ds-mcp-server-one.vercel.app/api/capabilities
 ```
 
 Expected fields:
@@ -57,7 +56,7 @@ Write actions log structured JSON to stdout:
   "timestamp": "2026-07-06T00:00:00.000Z",
   "action": "github_create_pr",
   "source": "mcp",
-  "owner": "nhatnguyenquang1838-coder",
+  "owner": "dw18031988",
   "repo": "ds_mcp_server",
   "branch": "ai/example",
   "pr_number": 123,
