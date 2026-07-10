@@ -45,7 +45,7 @@ GET    /api/tasks/{task_id}/events
 ## Create task
 
 ```bash
-curl -X POST https://ds-mcp-server-theta.vercel.app/api/tasks \
+curl -X POST https://ds-mcp-server-one.vercel.app/api/tasks \
   -H "Content-Type: application/json" \
   -d '{"title":"Review invoice mobile layout","task_type":"design_review","priority":"high","source":"manual"}'
 ```
@@ -55,7 +55,7 @@ curl -X POST https://ds-mcp-server-theta.vercel.app/api/tasks \
 Task state is changed through workflow transitions, not direct state patching.
 
 ```bash
-curl -X POST https://ds-mcp-server-theta.vercel.app/api/tasks/task_xxx/transitions \
+curl -X POST https://ds-mcp-server-one.vercel.app/api/tasks/task_xxx/transitions \
   -H "Content-Type: application/json" \
   -d '{"transition":"SUBMIT","actor":"user","note":"Ready for review"}'
 ```
