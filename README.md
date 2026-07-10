@@ -45,6 +45,40 @@ REST endpoints for GPT Actions:
 | `POST` | `/api/github/repos/{owner}/{repo}/pull-requests` | Create PR |
 | `POST` | `/api/github/repos/{owner}/{repo}/pull-requests/{pr_number}/comments` | Comment PR |
 | `GET` | `/api/github/repos/{owner}/{repo}/workflow-runs` | Read workflow runs |
+| `GET` | `/api/diagnostics/url-map` | Read safe URL and route diagnostics |
+
+## Production URL map
+
+Canonical production base URL:
+
+```text
+https://ds-mcp-server-one.vercel.app
+```
+
+| Surface | Production URL |
+|---|---|
+| Health | `https://ds-mcp-server-one.vercel.app/health` |
+| MCP connector | `https://ds-mcp-server-one.vercel.app/mcp` |
+| GitHub repo metadata | `https://ds-mcp-server-one.vercel.app/api/github/repos/{owner}/{repo}` |
+| GitHub files | `https://ds-mcp-server-one.vercel.app/api/github/repos/{owner}/{repo}/files` |
+| GitHub branches | `https://ds-mcp-server-one.vercel.app/api/github/repos/{owner}/{repo}/branches` |
+| GitHub pull requests | `https://ds-mcp-server-one.vercel.app/api/github/repos/{owner}/{repo}/pull-requests` |
+| GitHub workflow runs | `https://ds-mcp-server-one.vercel.app/api/github/repos/{owner}/{repo}/workflow-runs` |
+| GitHub webhook | `https://ds-mcp-server-one.vercel.app/api/webhooks/github` |
+| URL diagnostics | `https://ds-mcp-server-one.vercel.app/api/diagnostics/url-map` |
+
+Manual verification:
+
+```bash
+curl -i https://ds-mcp-server-one.vercel.app/health
+curl -i https://ds-mcp-server-one.vercel.app/mcp
+curl -i -H "Authorization: Bearer $REST_API_BEARER_TOKEN" \
+  https://ds-mcp-server-one.vercel.app/api/github/repos/dw18031988/ds_mcp_server
+curl -i -H "Authorization: Bearer $REST_API_BEARER_TOKEN" \
+  https://ds-mcp-server-one.vercel.app/api/diagnostics/url-map
+```
+
+The former `ds-mcp-server-theta.vercel.app` deployment is stale and must not be used as current production guidance.
 
 This repo is intentionally small. It is the public-MCP and REST-action foundation for a larger workflow:
 

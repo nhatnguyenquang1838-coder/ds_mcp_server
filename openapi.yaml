@@ -7,6 +7,7 @@ info:
 
 servers:
   - url: https://ds-mcp-server-one.vercel.app
+    description: DS MCP production
 
 security:
   - bearerAuth: []
@@ -31,6 +32,14 @@ paths:
                 required:
                   - ok
 
+  /api/diagnostics/url-map:
+    get:
+      summary: Đọc URL và route diagnostics an toàn
+      operationId: getUrlDiagnostics
+      x-openai-isConsequential: false
+      responses:
+        "200":
+          description: URL diagnostics không chứa secrets
   /api/capabilities:
     get:
       security: []
@@ -49,15 +58,22 @@ paths:
                     type: boolean
                   service:
                     type: string
-                  version:
+                    example: ds-mcp-server
+                  environment:
                     type: string
-                  mcp_path:
+                  baseUrl:
                     type: string
+                    example: https://ds-mcp-server-one.vercel.app
+                  routes:
+                    type: object
+                    additionalProperties:
+                      type: string
                 required:
                   - ok
                   - service
-                  - version
-                  - mcp_path
+                  - environment
+                  - baseUrl
+                  - routes
 
   /api/design-requests/{request_id}:
     get:

@@ -70,7 +70,7 @@ graph TD
 
 ## Tasks
 
-- [ ] 1. Inspect URL references
+- [x] 1. Inspect URL references
   - Checkout a guarded branch from `main`.
   - Search the repo for `ds-mcp-server-theta.vercel.app`.
   - Search the repo for `ds-mcp-server-one.vercel.app`.
@@ -78,21 +78,21 @@ graph TD
   - Capture every affected path and line.
   - _Requirements: 1, 3, 5_
 
-- [ ] 2. Classify URL references
+- [x] 2. Classify URL references
   - Mark each stale URL occurrence as production, historical, preview, test, or unknown.
   - Treat README, OpenAPI, connector setup, webhook setup, and curl examples as production unless clearly labeled otherwise.
   - Identify any historical entries that should be preserved but relabeled.
   - Confirm no unrelated Rental Home URL is included in scope.
   - _Requirements: 1, 3_
 
-- [ ] 3. Update README URL map
+- [x] 3. Update README URL map
   - Replace current-production stale DS MCP base URL with `https://ds-mcp-server-one.vercel.app`.
   - Add or update a concise URL map covering `/health`, `/mcp`, REST GitHub routes, and webhook route.
   - Add a short note that old `theta` URL is stale if historical context is needed.
   - Keep existing REST path descriptions intact.
   - _Requirements: 1, 2_
 
-- [ ] 4. Update OpenAPI servers
+- [x] 4. Update OpenAPI servers
   - Open `openapi.yaml`.
   - Replace stale server URL with `https://ds-mcp-server-one.vercel.app`.
   - Ensure YAML remains valid.
@@ -100,7 +100,7 @@ graph TD
   - Do not change endpoint schemas unless they are obviously stale due to URL-only drift.
   - _Requirements: 1, 3, 5_
 
-- [ ] 5. Update connector and operations docs
+- [x] 5. Update connector and operations docs
   - Update `docs/workspace-agent-trigger-setup.md` if it contains stale MCP or REST URL.
   - Update `docs/agentops-admin-ui.md` if it contains stale dashboard/API URL.
   - Update `docs/tasks-xstate-supabase.md` if it contains stale AgentOps/API URL.
@@ -108,7 +108,7 @@ graph TD
   - Update `.env.example` only if it contains URL examples, not secrets.
   - _Requirements: 1, 2, 3_
 
-- [ ] 6. Add REST fallback curl checks
+- [x] 6. Add REST fallback curl checks
   - Add curl examples for `/health`.
   - Add bearer-token curl example for repo metadata.
   - Add guarded-branch examples for branch creation and file upsert only if docs already include write examples.
@@ -116,14 +116,14 @@ graph TD
   - Ensure examples do not write to `main`.
   - _Requirements: 2, 5_
 
-- [ ] 7. Evaluate diagnostics route
+- [x] 7. Evaluate diagnostics route
   - Inspect `src/server.ts` and routing conventions.
   - Check whether `/health` already returns environment or service metadata.
   - Decide whether adding `/api/diagnostics/url-map` is low-risk.
   - If route addition would touch too much runtime code, skip it and document manual curl checks instead.
   - _Requirements: 4, 5_
 
-- [ ] 8. Add diagnostics route if safe
+- [x] 8. Add diagnostics route if safe
   - Add a read-only diagnostics route using the smallest existing routing surface.
   - Return service name, environment, canonical base URL, and route paths.
   - Do not return secrets, tokens, env values, or GitHub credentials.
@@ -136,14 +136,14 @@ graph TD
   - Include exact curl commands for `/health`, `/mcp`, and bearer-protected REST repo metadata.
   - _Requirements: 4, 5_
 
-- [ ] 10. Add or update tests
+- [x] 10. Add or update tests
   - Add a lightweight test for diagnostics route if implemented.
   - Add or update snapshot/string tests only if current repo already has matching test conventions.
   - Do not add brittle tests for every Markdown line.
   - If no tests are appropriate, document why validation is documentation-only.
   - _Requirements: 4, 5_
 
-- [ ] 11. Run validation
+- [x] 11. Run validation
   - Run `npm run typecheck`.
   - Run `npm run build`.
   - Run `npm test`.
@@ -151,7 +151,7 @@ graph TD
   - Record any failures honestly with logs or command output.
   - _Requirements: 1, 2, 3, 4, 5_
 
-- [ ] 12. Prepare PR and CI watch
+- [x] 12. Prepare PR and CI watch
   - Commit changes to `docs/remap-ds-mcp-vercel-url`.
   - Open PR to `main`.
   - Include changed files, URL mapping, validation result, and any skipped diagnostics explanation.
@@ -168,3 +168,7 @@ graph TD
 - Do not write directly to `main`.
 - Use guarded branch prefix `docs/`.
 - If connector write access is blocked, export patch or ZIP and report the blocker.
+- CI failure after conflict resolution: `src/server.ts(1662,87): TS2304 Cannot find name 'isRestAuthorized'`.
+- Root cause: obsolete REST auth block survived while the repository had migrated to centralized `enforceSecurity` and `resolveRoutePolicy`.
+- Fix: removed the obsolete check, registered `/api/diagnostics/url-map` as an explicit public route, and added route-policy regression coverage.
+- GitHub Actions CI run `29095522259` passed for fix head `8f0f79a1f90bd8b9602ab710b77363d91dc06d19`.

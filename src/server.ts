@@ -40,6 +40,7 @@ import {
 import { triggerWorkspaceAgent } from "./tools/workspaceAgentClient.js";
 import { handleAgentOpsRestApi } from "./agentops/router.js";
 import { handleGitHubUploadRestApi } from "./githubUploadRouter.js";
+import { getUrlDiagnostics } from "./urlDiagnostics.js";
 import { acquireRateLimit } from "./security/rateLimit.js";
 import { authorizeRoute } from "./security/auth.js";
 import { buildSecurityPosture } from "./security/posture.js";
@@ -1021,6 +1022,7 @@ function getCapabilities() {
     ],
     rest_paths: [
       "/api/capabilities",
+      "/api/diagnostics/url-map",
       "/api/security/posture",
       "/api/dashboard/upstream-calls",
       "/api/webhooks/github",
@@ -1640,6 +1642,20 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
   if (req.method === "GET" && url.pathname === "/api/capabilities") {
     setCorsHeaders(req, res);
     sendJson(res, 200, getCapabilities());
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/diagnostics/url-map") {
+    setCorsHeaders(req, res);
+    sendJson(
+      res,
+      200,
+      getUrlDiagnostics({
+        baseUrl: requestBaseUrl(req),
+        environment: config.runtimeMode,
+        mcpPath: config.mcpPath
+      })
+    );
     return true;
   }
 

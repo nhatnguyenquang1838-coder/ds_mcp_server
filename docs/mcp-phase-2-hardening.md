@@ -49,7 +49,7 @@ For local debugging, `MCP_BEARER_TOKEN` can still be used with MCP Inspector and
 
 If `PUBLIC_BASE_URL` is not configured, the server can still derive its OAuth issuer from the active deployment host, which keeps Vercel deployments bootable without extra OAuth-specific env wiring.
 
-## Capability check
+## Capability and URL diagnostics checks
 
 ```bash
 curl https://ds-mcp-server-one.vercel.app/api/capabilities

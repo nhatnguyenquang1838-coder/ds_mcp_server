@@ -128,6 +128,10 @@ export function resolveRoutePolicy(method: string, pathname: string): ResolvedRo
     return { routeId: "public.capabilities", policy: "public", sensitive: false };
   }
 
+  if (normalizedMethod === "GET" && pathname === "/api/diagnostics/url-map") {
+    return { routeId: "public.url-diagnostics", policy: "public", sensitive: false };
+  }
+
   if (isGitHubWebhook(pathname)) {
     return { routeId: "webhook.github", policy: "webhook_signature", sensitive: true };
   }
