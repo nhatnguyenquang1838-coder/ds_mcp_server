@@ -143,7 +143,7 @@ graph TD
   - If no tests are appropriate, document why validation is documentation-only.
   - _Requirements: 4, 5_
 
-- [~] 11. Run validation
+- [x] 11. Run validation
   - Run `npm run typecheck`.
   - Run `npm run build`.
   - Run `npm test`.
@@ -151,7 +151,7 @@ graph TD
   - Record any failures honestly with logs or command output.
   - _Requirements: 1, 2, 3, 4, 5_
 
-- [~] 12. Prepare PR and CI watch
+- [x] 12. Prepare PR and CI watch
   - Commit changes to `docs/remap-ds-mcp-vercel-url`.
   - Open PR to `main`.
   - Include changed files, URL mapping, validation result, and any skipped diagnostics explanation.
@@ -168,4 +168,7 @@ graph TD
 - Do not write directly to `main`.
 - Use guarded branch prefix `docs/`.
 - If connector write access is blocked, export patch or ZIP and report the blocker.
-- CI watch note: a follow-up commit was pushed to retrigger pull-request validation for the current branch head.
+- CI failure after conflict resolution: `src/server.ts(1662,87): TS2304 Cannot find name 'isRestAuthorized'`.
+- Root cause: obsolete REST auth block survived while the repository had migrated to centralized `enforceSecurity` and `resolveRoutePolicy`.
+- Fix: removed the obsolete check, registered `/api/diagnostics/url-map` as an explicit public route, and added route-policy regression coverage.
+- GitHub Actions CI run `29095522259` passed for fix head `8f0f79a1f90bd8b9602ab710b77363d91dc06d19`.
