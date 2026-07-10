@@ -42,6 +42,17 @@ import { handleAgentOpsRestApi } from "./agentops/router.js";
 import { handleGitHubUploadRestApi } from "./githubUploadRouter.js";
 import { acquireRateLimit } from "./security/rateLimit.js";
 import { authorizeRoute } from "./security/auth.js";
+import {
+  buildOAuthMetadataJson,
+  buildOAuthProtectedResourceJson,
+  createOAuthAuthorizationCode,
+  exchangeOAuthAuthorizationCode,
+  getOAuthClientRecord,
+  parseOAuthBasicClientAuth,
+  revokeOAuthToken,
+  registerOAuthClient,
+  refreshOAuthAccessToken
+} from "./security/oauth.js";
 import { resolveRoutePolicy } from "./security/routePolicy.js";
 import {
   formatSecurityStartupError,
@@ -159,6 +170,422 @@ function isMcpRequestPath(mcpPath: string, pathname: string): boolean {
   const normalizedMcpPath = normalizeMcpPath(mcpPath);
   if (pathname === normalizedMcpPath) return true;
   return mcpUrlSecretFromPathname(normalizedMcpPath, pathname) !== undefined;
+}
+
+async function readFormBody(
+  req: IncomingMessage,
+  maxBytes = config.maxJsonBodyBytes
+): Promise<Record<string, string>> {
+  const rawBody = (await readRawBodyWithLimit(req, maxBytes)).toString("utf8");
+  const form = new URLSearchParams(rawBody);
+  const result: Record<string, string> = {};
+  for (const [key, value] of form.entries()) {
+    result[key] = value;
+  }
+  return result;
+}
+
+function oauthErrorResponse(
+  req: IncomingMessage,
+  res: ServerResponse,
+  statusCode: number,
+  error: string,
+  description?: string
+): void {
+  const requestIdValue = requestId(req);
+  sendJson(
+    res,
+    statusCode,
+    {
+      error,
+      error_description: description,
+      request_id: requestIdValue
+    },
+    { "X-Request-Id": requestIdValue }
+  );
+}
+
+function renderOAuthConsentPage(input: {
+  clientName: string;
+  clientId: string;
+  redirectUri: string;
+  scope: string;
+  state?: string;
+  codeChallenge: string;
+  codeChallengeMethod: string;
+}): string {
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Authorize ${escapeHtml(input.clientName)}</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 0; padding: 32px; background: #0b0f19; color: #e5e7eb; }
+      .card { max-width: 640px; margin: 0 auto; background: #111827; border: 1px solid #243045; border-radius: 16px; padding: 28px; }
+      .muted { color: #9ca3af; }
+      .meta { background: #0f172a; border: 1px solid #243045; border-radius: 12px; padding: 12px 16px; margin: 16px 0; word-break: break-all; }
+      .actions { display: flex; gap: 12px; margin-top: 24px; }
+      button { border: 0; border-radius: 999px; padding: 12px 20px; font-weight: 600; cursor: pointer; }
+      .primary { background: #22c55e; color: #04120a; }
+      .secondary { background: #243045; color: #e5e7eb; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      form { margin: 0; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>Authorize ${escapeHtml(input.clientName)}</h1>
+      <p class="muted">Allow this connector to access the DS MCP server.</p>
+      <div class="meta">
+        <div><strong>Client ID:</strong> <code>${escapeHtml(input.clientId)}</code></div>
+        <div><strong>Redirect URI:</strong> <code>${escapeHtml(input.redirectUri)}</code></div>
+        <div><strong>Scope:</strong> <code>${escapeHtml(input.scope)}</code></div>
+      </div>
+      <form method="post" action="/oauth/authorize">
+        <input type="hidden" name="client_id" value="${escapeHtml(input.clientId)}" />
+        <input type="hidden" name="redirect_uri" value="${escapeHtml(input.redirectUri)}" />
+        <input type="hidden" name="scope" value="${escapeHtml(input.scope)}" />
+        <input type="hidden" name="code_challenge" value="${escapeHtml(input.codeChallenge)}" />
+        <input type="hidden" name="code_challenge_method" value="${escapeHtml(input.codeChallengeMethod)}" />
+        ${input.state ? `<input type="hidden" name="state" value="${escapeHtml(input.state)}" />` : ""}
+        <input type="hidden" name="action" value="approve" />
+        <div class="actions">
+          <button class="primary" type="submit">Authorize</button>
+          <button class="secondary" type="submit" formaction="/oauth/authorize" formmethod="post" name="action" value="deny">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </body>
+</html>`;
+}
+
+async function handleOAuthRequests(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL
+): Promise<boolean> {
+  const requestBase = requestBaseUrl(req);
+  const pathname = url.pathname;
+
+  if (
+    pathname === "/.well-known/oauth-authorization-server" ||
+    pathname === "/.well-known/openid-configuration"
+  ) {
+    sendJson(
+      res,
+      200,
+      buildOAuthMetadataJson(config, requestBase),
+      { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+    );
+    return true;
+  }
+
+  if (pathname === "/.well-known/oauth-protected-resource") {
+    sendJson(
+      res,
+      200,
+      buildOAuthProtectedResourceJson(config, requestBase),
+      { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+    );
+    return true;
+  }
+
+  if (pathname === "/oauth/register") {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return true;
+    }
+
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" }, { "X-Request-Id": requestId(req) });
+      return true;
+    }
+
+    try {
+      const raw = (await readJsonBody(req)) as {
+        client_name?: string;
+        redirect_uris?: string[];
+        grant_types?: string[];
+        response_types?: string[];
+        token_endpoint_auth_method?: string;
+      };
+
+      const registration = await registerOAuthClient(config, raw);
+      sendJson(
+        res,
+        201,
+        {
+          client_id: registration.client_id,
+          client_secret: registration.client_secret,
+          client_id_issued_at: Math.floor(Date.now() / 1000),
+          client_secret_expires_at: registration.client_secret ? 0 : undefined,
+          token_endpoint_auth_method: registration.token_endpoint_auth_method
+        },
+        { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+      );
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "invalid_client_metadata";
+      sendJson(
+        res,
+        400,
+        { error: "invalid_client_metadata", error_description: message },
+        { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+      );
+      return true;
+    }
+  }
+
+  if (pathname === "/oauth/authorize") {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return true;
+    }
+
+    if (!req.method || !["GET", "POST"].includes(req.method)) {
+      sendJson(res, 405, { error: "Method not allowed" }, { "X-Request-Id": requestId(req) });
+      return true;
+    }
+
+    const params =
+      req.method === "GET"
+        ? Object.fromEntries(url.searchParams.entries())
+        : await readFormBody(req);
+
+    const responseType = (params.response_type || "code").trim();
+    const clientId = (params.client_id || "").trim();
+    const redirectUri = (params.redirect_uri || "").trim();
+    const scope = (params.scope || "mcp").trim();
+    const codeChallenge = (params.code_challenge || "").trim();
+    const codeChallengeMethod = (params.code_challenge_method || "S256").trim();
+    const state = (params.state || "").trim() || undefined;
+
+    if (responseType !== "code" || !clientId || !redirectUri || !codeChallenge) {
+      sendJson(
+        res,
+        400,
+        { error: "invalid_request", error_description: "Missing OAuth parameters" },
+        { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+      );
+      return true;
+    }
+
+    const client = await getOAuthClientRecord(config, clientId);
+    if (!client || client.revoked_at) {
+      sendJson(
+        res,
+        400,
+        { error: "invalid_client", error_description: "Unknown OAuth client" },
+        { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+      );
+      return true;
+    }
+
+    if (!client.redirect_uris.includes(redirectUri)) {
+      sendJson(
+        res,
+        400,
+        { error: "invalid_request", error_description: "redirect_uri_mismatch" },
+        { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+      );
+      return true;
+    }
+
+    if (req.method === "GET") {
+      sendHtml(
+        res,
+        200,
+        renderOAuthConsentPage({
+          clientName: client.client_name,
+          clientId,
+          redirectUri,
+          scope,
+          state,
+          codeChallenge,
+          codeChallengeMethod
+        }),
+        { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+      );
+      return true;
+    }
+
+    const action = ((params.action || params.approve || "approve") as string).trim().toLowerCase();
+    if (action === "deny" || action === "cancel") {
+      const denied = new URL(redirectUri);
+      denied.searchParams.set("error", "access_denied");
+      if (state) denied.searchParams.set("state", state);
+      res.writeHead(302, {
+        Location: denied.toString(),
+        "Cache-Control": "no-store",
+        "X-Request-Id": requestId(req)
+      });
+      res.end();
+      return true;
+    }
+
+    try {
+      const authorizationCode = await createOAuthAuthorizationCode(config, {
+        clientId,
+        redirectUri,
+        scope,
+        codeChallenge,
+        codeChallengeMethod,
+        state
+      });
+
+      const approved = new URL(redirectUri);
+      approved.searchParams.set("code", authorizationCode.code);
+      if (state) approved.searchParams.set("state", state);
+
+      res.writeHead(302, {
+        Location: approved.toString(),
+        "Cache-Control": "no-store",
+        "X-Request-Id": requestId(req)
+      });
+      res.end();
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "invalid_request";
+      sendJson(
+        res,
+        400,
+        { error: "invalid_request", error_description: message },
+        { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+      );
+      return true;
+    }
+  }
+
+  if (pathname === "/oauth/token") {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return true;
+    }
+
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" }, { "X-Request-Id": requestId(req) });
+      return true;
+    }
+
+    const form = await readFormBody(req);
+    const basicClient = parseOAuthBasicClientAuth(firstHeader(req.headers.authorization));
+    const clientId = form.client_id || basicClient?.client_id;
+    const clientSecret = form.client_secret || basicClient?.client_secret;
+
+    if (basicClient && form.client_id && basicClient.client_id !== form.client_id) {
+      sendJson(
+        res,
+        401,
+        { error: "invalid_client" },
+        { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+      );
+      return true;
+    }
+
+    if (!clientId) {
+      sendJson(
+        res,
+        401,
+        { error: "invalid_client" },
+        { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+      );
+      return true;
+    }
+
+    const grantType = (form.grant_type || "").trim();
+    let result;
+
+    if (grantType === "authorization_code") {
+      result = await exchangeOAuthAuthorizationCode(config, {
+        clientId,
+        clientSecret,
+        code: (form.code || "").trim(),
+        redirectUri: (form.redirect_uri || "").trim(),
+        codeVerifier: (form.code_verifier || "").trim()
+      });
+    } else if (grantType === "refresh_token") {
+      result = await refreshOAuthAccessToken(config, {
+        clientId,
+        clientSecret,
+        refreshToken: (form.refresh_token || "").trim()
+      });
+    } else {
+      sendJson(
+        res,
+        400,
+        { error: "unsupported_grant_type" },
+        { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+      );
+      return true;
+    }
+
+    if (!result.ok) {
+      sendJson(
+        res,
+        result.error === "invalid_client" ? 401 : 400,
+        {
+          error: result.error,
+          error_description: result.error_description
+        },
+        { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
+      );
+      return true;
+    }
+
+    sendJson(
+      res,
+      200,
+      {
+        access_token: result.access_token,
+        token_type: result.token_type,
+        expires_in: result.expires_in,
+        refresh_token: result.refresh_token,
+        scope: result.scope
+      },
+      {
+        "Cache-Control": "no-store",
+        Pragma: "no-cache",
+        "X-Request-Id": requestId(req)
+      }
+    );
+    return true;
+  }
+
+  if (pathname === "/oauth/revoke") {
+    if (req.method === "OPTIONS") {
+      res.writeHead(204);
+      res.end();
+      return true;
+    }
+
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" }, { "X-Request-Id": requestId(req) });
+      return true;
+    }
+
+    const form = await readFormBody(req);
+    const token = (form.token || "").trim();
+    if (token) {
+      try {
+        await revokeOAuthToken(config, token);
+      } catch (error) {
+        console.error("OAuth token revocation failed", error);
+      }
+    }
+
+    res.writeHead(200, {
+      "Cache-Control": "no-store",
+      "X-Request-Id": requestId(req)
+    });
+    res.end();
+    return true;
+  }
+
+  return false;
 }
 
 function requestId(req: IncomingMessage): string {
@@ -545,7 +972,10 @@ function getCapabilities() {
     auth: {
       mcp_bearer_token_configured: Boolean(config.mcpBearerToken),
       mcp_url_secret_configured: Boolean(config.mcpUrlSecret),
-      rest_api_bearer_token_configured: Boolean(config.restApiBearerToken),
+      mcp_oauth_configured: Boolean(
+        config.publicBaseUrl && config.supabaseUrl && config.supabaseServiceRoleKey
+      ),
+      rest_api_bearer_token_configured: Boolean(config.restApiBearerToken),    
       github_token_configured: Boolean(config.githubToken),
       github_webhook_secret_configured: Boolean(config.githubWebhookSecret),
       workspace_agent_trigger_configured: Boolean(
@@ -660,7 +1090,7 @@ async function enforceSecurity(
     return null;
   }
 
-  const authDecision = authorizeRoute(config, securityRoute.policy, req);
+  const authDecision = await authorizeRoute(config, securityRoute.policy, req);
   if (!authDecision.ok) {
     logSecurityDenial({
       requestId: requestIdValue,
@@ -1215,6 +1645,9 @@ const httpServer = createServer(async (req, res) => {
 
   const handledWorkspaceAgentCallback = await handleWorkspaceAgentCallback(req, res, url);
   if (handledWorkspaceAgentCallback) return;
+
+  const handledOAuth = await handleOAuthRequests(req, res, url);
+  if (handledOAuth) return;
 
   const handledRestApi = await handleRestApi(req, res, url);
   if (handledRestApi) return;

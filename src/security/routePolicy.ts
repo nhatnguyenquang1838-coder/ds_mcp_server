@@ -49,6 +49,18 @@ function isGitHubWebhook(pathname: string): boolean {
   return pathname === "/api/webhooks/github";
 }
 
+function isOAuthPath(pathname: string): boolean {
+  return (
+    pathname === "/.well-known/oauth-authorization-server" ||
+    pathname === "/.well-known/oauth-protected-resource" ||
+    pathname === "/.well-known/openid-configuration" ||
+    pathname === "/oauth/register" ||
+    pathname === "/oauth/authorize" ||
+    pathname === "/oauth/token" ||
+    pathname === "/oauth/revoke"
+  );
+}
+
 export function resolveRoutePolicy(method: string, pathname: string): ResolvedRoutePolicy {
   const normalizedMethod = method.toUpperCase();
 
@@ -66,6 +78,10 @@ export function resolveRoutePolicy(method: string, pathname: string): ResolvedRo
 
   if (isGitHubWebhook(pathname)) {
     return { routeId: "webhook.github", policy: "webhook_signature", sensitive: true };
+  }
+
+  if (isOAuthPath(pathname)) {
+    return { routeId: `oauth.${pathname.replace(/^\//, "").replace(/\//g, ".")}`, policy: "public", sensitive: false };
   }
 
   if (pathname === "/mcp") {

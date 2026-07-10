@@ -2,11 +2,14 @@ import { timingSafeEqual, createHmac } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { AppConfig } from "../config.js";
 import type { RouteAuthPolicy } from "./routePolicy.js";
+import { verifyOAuthAccessToken } from "./oauth.js";
+import { isSupabaseConfigured } from "../db/supabaseClient.js";
 
 export type Principal =
   | { type: "public"; id: "anonymous" }
   | { type: "rest"; id: "shared-rest-token" }
   | { type: "mcp"; id: "shared-mcp-token" }
+  | { type: "oauth"; id: string; scopes: string[] }
   | { type: "internal"; id: "shared-internal-token" }
   | { type: "webhook"; id: "github-webhook" };
 
@@ -41,11 +44,11 @@ function webhookSignatureMatches(secret: string, req: IncomingMessage): boolean 
   return constantTimeEquals(expected, signature);
 }
 
-export function authorizeRoute(
+export async function authorizeRoute(
   config: AppConfig,
   policy: RouteAuthPolicy,
   req: IncomingMessage
-): AuthDecision {
+): Promise<AuthDecision> {
   if (policy === "public") {
     return { ok: true, principal: { type: "public", id: "anonymous" } };
   }
@@ -73,15 +76,22 @@ export function authorizeRoute(
   }
 
   if (policy === "mcp_bearer") {
-    if (!config.mcpBearerToken) {
+    if (config.mcpBearerToken && bearer && constantTimeEquals(config.mcpBearerToken, bearer)) {
+      return { ok: true, principal: { type: "mcp", id: "shared-mcp-token" } };
+    }
+
+    if (bearer && isSupabaseConfigured(config)) {
+      const oauthPrincipal = await verifyOAuthAccessToken(config, bearer);
+      if (oauthPrincipal) {
+        return { ok: true, principal: oauthPrincipal };
+      }
+    }
+
+    if (!config.mcpBearerToken && !isSupabaseConfigured(config)) {
       return { ok: true, principal: { type: "public", id: "anonymous" } };
     }
 
-    if (!bearer || !constantTimeEquals(config.mcpBearerToken, bearer)) {
-      return { ok: false, status: 401, error: "Unauthorized" };
-    }
-
-    return { ok: true, principal: { type: "mcp", id: "shared-mcp-token" } };
+    return { ok: false, status: 401, error: "Unauthorized" };
   }
 
   if (policy === "internal_token") {

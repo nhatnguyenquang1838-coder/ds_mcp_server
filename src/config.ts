@@ -169,6 +169,7 @@ export function loadConfig(): AppConfig {
   const activeProfile = activeDatabaseProfile(databaseProfiles, activeDbTarget);
   const securityEnforcement = readSecurityEnforcement(process.env.SECURITY_ENFORCEMENT);
   const corsAllowedOrigins = readOrigins(process.env.CORS_ALLOWED_ORIGINS);
+  const vercelUrl = process.env.VERCEL_URL?.trim();
 
   return {
     port: readPort(process.env.PORT),
@@ -199,7 +200,7 @@ export function loadConfig(): AppConfig {
     workspaceAgentCallbackToken: process.env.WORKSPACE_AGENT_CALLBACK_TOKEN || undefined,
     workspaceAgentApiBaseUrl:
       process.env.WORKSPACE_AGENT_API_BASE_URL || "https://api.chatgpt.com",
-    publicBaseUrl: process.env.PUBLIC_BASE_URL || undefined,
+    publicBaseUrl: process.env.PUBLIC_BASE_URL || (vercelUrl ? `https://${vercelUrl}` : undefined),
     supabaseUrl: activeProfile.supabaseUrl,
     supabaseServiceRoleKey: activeProfile.supabaseServiceRoleKey,
     runtimeMode: readRuntimeMode(process.env.APP_RUNTIME_MODE),

@@ -30,25 +30,24 @@ GET /api/capabilities
 
 ## MCP connector behavior
 
-For ChatGPT MCP connectors, use a capability URL secret instead of static bearer auth:
+For ChatGPT MCP connectors, use OAuth:
+
+```text
+Authorization URL: https://ds-mcp-server-one.vercel.app/oauth/authorize
+Token URL: https://ds-mcp-server-one.vercel.app/oauth/token
+Registration URL: https://ds-mcp-server-one.vercel.app/oauth/register
+Discovery URL: https://ds-mcp-server-one.vercel.app/.well-known/oauth-authorization-server
+```
+
+The public base URL must be set so the server can publish stable OAuth metadata:
 
 ```env
-MCP_URL_SECRET=replace-with-a-long-random-secret
+PUBLIC_BASE_URL=https://ds-mcp-server-one.vercel.app
 ```
 
-Connector URL:
+For local debugging, `MCP_BEARER_TOKEN` can still be used with MCP Inspector and other direct clients. `MCP_URL_SECRET` remains available only as a temporary compatibility path.
 
-```text
-https://ds-mcp-server-one.vercel.app/mcp/<MCP_URL_SECRET>
-```
-
-Connector auth:
-
-```text
-No Authentication
-```
-
-For local debugging, `MCP_BEARER_TOKEN` can still be used with MCP Inspector and other direct clients.
+If `PUBLIC_BASE_URL` is not configured, the server can still derive its OAuth issuer from the active deployment host, which keeps Vercel deployments bootable without extra OAuth-specific env wiring.
 
 ## Capability check
 
