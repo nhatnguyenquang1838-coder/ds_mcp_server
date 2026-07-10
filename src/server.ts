@@ -1646,7 +1646,7 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
   }
 
   if (req.method === "GET" && url.pathname === "/api/diagnostics/url-map") {
-    setCorsHeaders(res);
+    setCorsHeaders(req, res);
     sendJson(
       res,
       200,
@@ -1659,11 +1659,6 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
     return true;
   }
 
-  if (url.pathname.startsWith("/api/") && url.pathname !== "/api/webhooks/github" && !isRestAuthorized(req)) {
-    setCorsHeaders(res);
-    sendJson(res, 401, { error: "Unauthorized" });
-    return true;
-  }
   const handledSecurityApi = await handleSecurityApi(req, res, url);
   if (handledSecurityApi) return true;
 
