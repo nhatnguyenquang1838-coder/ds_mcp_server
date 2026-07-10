@@ -6,7 +6,7 @@ info:
   description: REST wrapper cho Design System Review Agent và GitHub gateway. Không gọi trực tiếp MCP /mcp.
 
 servers:
-  - url: https://ds-mcp-server-theta.vercel.app
+  - url: https://ds-mcp-server-one.vercel.app
 
 paths:
   /health:
