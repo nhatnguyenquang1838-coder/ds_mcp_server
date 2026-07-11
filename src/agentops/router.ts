@@ -319,10 +319,33 @@ export async function handleAgentOpsRestApi(
       return true;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/workflows") {
+      sendJson(res, 200, { ok: true, workflows: await listAsyncWorkflows(config, queryLimit(url, 100)) });
+      return true;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/workflows") {
       const body = createAsyncWorkflowSchema.parse(await readJsonBody(req));
       const output = await createAsyncWorkflow(config, body);
       sendJson(res, 202, { ok: true, workflow: output.workflow, current_task: output.task });
+      return true;
+    }
+
+    const workflowTasksBulkMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/tasks\/bulk$/);
+
+    if (workflowTasksBulkMatch && req.method === "POST") {
+      const workflowId = decodePathValue(workflowTasksBulkMatch[1]);
+      const body = bulkAddAsyncWorkflowTasksSchema.parse(await readJsonBody(req));
+      const workflowTasks = await addAsyncWorkflowTasks(config, workflowId, body.tasks);
+      sendJson(res, 201, { ok: true, tasks: workflowTasks });
+      return true;
+    }
+
+    if (workflowTasksBulkMatch && req.method === "DELETE") {
+      const workflowId = decodePathValue(workflowTasksBulkMatch[1]);
+      const body = bulkRemoveAsyncWorkflowTasksSchema.parse(await readJsonBody(req));
+      const workflowTasks = await removeAsyncWorkflowTasks(config, workflowId, body.task_ids);
+      sendJson(res, 200, { ok: true, tasks: workflowTasks });
       return true;
     }
 
@@ -335,6 +358,29 @@ export async function handleAgentOpsRestApi(
         return true;
       }
       sendJson(res, 200, { ok: true, ...output });
+      return true;
+    }
+
+    if (req.method === "PATCH" && workflowMatch) {
+      const workflowId = decodePathValue(workflowMatch[1]);
+      const body = updateAsyncWorkflowSchema.parse(await readJsonBody(req));
+      const workflow = await updateAsyncWorkflow(config, workflowId, body);
+      if (!workflow) {
+        sendJson(res, 404, { error: "Workflow not found" });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, workflow });
+      return true;
+    }
+
+    if (req.method === "DELETE" && workflowMatch) {
+      const workflowId = decodePathValue(workflowMatch[1]);
+      const workflow = await deleteAsyncWorkflow(config, workflowId, url.searchParams.get("force") === "true");
+      if (!workflow) {
+        sendJson(res, 404, { error: "Workflow not found" });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, workflow });
       return true;
     }
 
