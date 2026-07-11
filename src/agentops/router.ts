@@ -2,6 +2,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z, ZodError } from "zod";
 import type { AppConfig } from "../config.js";
 import {
+  bulkCreateTaskLinksSchema,
+  bulkCreateTasksSchema,
+  bulkDeleteTaskLinksSchema,
+  bulkDeleteTasksSchema,
+  bulkTransitionTasksSchema,
+  bulkUpdateTasksSchema,
   createTaskLinkSchema,
   createTaskSchema,
   transitionTaskSchema,
@@ -10,6 +16,8 @@ import {
 import {
   createTask,
   createTaskLink,
+  deleteTask,
+  deleteTaskLink,
   getTask,
   listTaskEvents,
   listTaskLinks,
@@ -19,17 +27,25 @@ import {
 } from "./taskStore.js";
 import { availableTaskTransitions } from "./taskMachine.js";
 import {
+  bulkAddAsyncWorkflowTasksSchema,
+  bulkRemoveAsyncWorkflowTasksSchema,
   claimAsyncTaskSchema,
   createAsyncWorkflowSchema,
   githubCiEventSchema,
-  submitAsyncTaskResultSchema
+  submitAsyncTaskResultSchema,
+  updateAsyncWorkflowSchema
 } from "../asyncWorkflowSchemas.js";
 import {
+  addAsyncWorkflowTasks,
   claimAsyncTask,
   createAsyncWorkflow,
+  deleteAsyncWorkflow,
   getAsyncWorkflow,
   handleGithubCiEvent,
-  submitAsyncTaskResult
+  listAsyncWorkflows,
+  removeAsyncWorkflowTasks,
+  submitAsyncTaskResult,
+  updateAsyncWorkflow
 } from "../asyncWorkflowStore.js";
 import { getOrchestrationDashboardSnapshot } from "../dashboard/orchestrationDashboard.js";
 import { listAgentHealth, listAgents, recordAgentHeartbeat, registerAgent } from "../agents/agentRegistry.js";
