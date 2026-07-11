@@ -169,6 +169,77 @@ export async function createWorkflowRecord(
   return asWorkflow(data as WorkflowRow);
 }
 
+export async function listWorkflowRecords(
+  config: AppConfig,
+  limit = 100
+): Promise<AsyncWorkflow[]> {
+  const supabase = getSupabaseClient(config);
+  const { data, error } = await supabase
+    .from("workflows")
+    .select("*")
+    .order("updated_at", { ascending: false })
+    .limit(Math.min(Math.max(limit, 1), 200));
+  if (error) throw new Error(`Failed to list workflows: ${error.message}`);
+  return ((data ?? []) as WorkflowRow[]).map(asWorkflow);
+}
+
+export async function updateWorkflowRecord(
+  config: AppConfig,
+  workflowId: string,
+  input: { name?: string; input?: JsonRecord }
+): Promise<AsyncWorkflow | undefined> {
+  const updates: Record<string, unknown> = { updated_at: now() };
+  if (input.name !== undefined) updates.name = input.name;
+  if (input.input !== undefined) {
+    updates.context_json = input.input;
+    updates.input_json = input.input;
+  }
+
+  const supabase = getSupabaseClient(config);
+  const { data, error } = await supabase
+    .from("workflows")
+    .update(updates)
+    .eq("id", workflowId)
+    .select("*")
+    .maybeSingle();
+  if (error) throw new Error(`Failed to update workflow: ${error.message}`);
+  return data ? asWorkflow(data as WorkflowRow) : undefined;
+}
+
+export async function deleteWorkflowRecord(
+  config: AppConfig,
+  workflowId: string,
+  force = false
+): Promise<AsyncWorkflow | undefined> {
+  const current = await getWorkflowRecord(config, workflowId);
+  if (!current) return undefined;
+
+  const activeTask = current.tasks.find((task) => ["leased", "running"].includes(task.status));
+  if (activeTask) {
+    throw new Error(`Workflow has active task ${activeTask.id} in ${activeTask.status} state`);
+  }
+  if (current.tasks.length > 0 && !force) {
+    throw new Error("Workflow has tasks; use force to delete the workflow and removable tasks");
+  }
+
+  const supabase = getSupabaseClient(config);
+  const taskIds = current.tasks.map((task) => task.id);
+  if (taskIds.length > 0) {
+    const { error: leasesError } = await supabase.from("task_leases").delete().in("task_id", taskIds);
+    if (leasesError) throw new Error(`Failed to delete workflow task leases: ${leasesError.message}`);
+  }
+
+  const { error: eventsError } = await supabase.from("task_events").delete().eq("workflow_id", workflowId);
+  if (eventsError) throw new Error(`Failed to delete workflow events: ${eventsError.message}`);
+
+  const { error: tasksError } = await supabase.from("tasks").delete().eq("workflow_id", workflowId);
+  if (tasksError) throw new Error(`Failed to delete workflow tasks: ${tasksError.message}`);
+
+  const { error } = await supabase.from("workflows").delete().eq("id", workflowId);
+  if (error) throw new Error(`Failed to delete workflow: ${error.message}`);
+  return current.workflow;
+}
+
 export async function updateWorkflowCurrentTask(
   config: AppConfig,
   workflowId: string,
@@ -247,6 +318,54 @@ export async function createTaskRecord(
   });
 
   return asTask(data as TaskRow);
+}
+
+export async function deleteTaskRecords(
+  config: AppConfig,
+  workflowId: string,
+  taskIds: string[]
+): Promise<AsyncTask[]> {
+  const supabase = getSupabaseClient(config);
+  const { data: rows, error: loadError } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("workflow_id", workflowId)
+    .in("id", taskIds);
+  if (loadError) throw new Error(`Failed to load workflow tasks: ${loadError.message}`);
+
+  const matched = ((rows ?? []) as TaskRow[]).map(asTask);
+  if (matched.length !== taskIds.length) {
+    throw new Error("One or more workflow tasks were not found");
+  }
+
+  const protectedTask = matched.find((task) => !["queued", "waiting_external"].includes(task.status));
+  if (protectedTask) {
+    throw new Error(`Workflow task ${protectedTask.id} in ${protectedTask.status} state cannot be removed`);
+  }
+
+  const { error: leasesError } = await supabase.from("task_leases").delete().in("task_id", taskIds);
+  if (leasesError) throw new Error(`Failed to delete task leases: ${leasesError.message}`);
+
+  const { error: eventsError } = await supabase.from("task_events").delete().in("task_id", taskIds);
+  if (eventsError) throw new Error(`Failed to delete task events: ${eventsError.message}`);
+
+  const { error: deleteError } = await supabase
+    .from("tasks")
+    .delete()
+    .eq("workflow_id", workflowId)
+    .in("id", taskIds);
+  if (deleteError) throw new Error(`Failed to delete workflow tasks: ${deleteError.message}`);
+
+  const { data: remaining, error: remainingError } = await supabase
+    .from("tasks")
+    .select("id")
+    .eq("workflow_id", workflowId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (remainingError) throw new Error(`Failed to refresh workflow current task: ${remainingError.message}`);
+  await updateWorkflowCurrentTask(config, workflowId, (remaining ?? [])[0]?.id);
+
+  return matched;
 }
 
 export async function getWorkflowRecord(
