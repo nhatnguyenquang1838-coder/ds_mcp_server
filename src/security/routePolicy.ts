@@ -30,6 +30,7 @@ function isAgentOpsPath(pathname: string): boolean {
   return (
     pathname === "/api/tasks" ||
     pathname.startsWith("/api/tasks/") ||
+    pathname.startsWith("/api/task-links/") ||
     pathname === "/api/workflows" ||
     pathname.startsWith("/api/workflows/") ||
     pathname === "/api/async-tasks/claim" ||
@@ -96,7 +97,8 @@ export function resolveRateLimitPolicy(method: string, pathname: string): Resolv
 
   if (
     (pathname === "/api/tasks" && normalizedMethod === "POST") ||
-    (pathname.startsWith("/api/tasks/") && normalizedMethod === "POST") ||
+    (pathname.startsWith("/api/tasks/") && ["POST", "PATCH", "DELETE"].includes(normalizedMethod)) ||
+    (pathname.startsWith("/api/task-links/") && ["POST", "DELETE"].includes(normalizedMethod)) ||
     (pathname === "/api/workflows" && normalizedMethod === "POST") ||
     (pathname.startsWith("/api/workflows/") && normalizedMethod === "POST") ||
     pathname === "/api/agent-results" ||
@@ -180,6 +182,7 @@ export function resolveRoutePolicy(method: string, pathname: string): ResolvedRo
     pathname.startsWith("/api/agent-runs/") ||
     pathname === "/api/tasks" ||
     pathname.startsWith("/api/tasks/") ||
+    pathname.startsWith("/api/task-links/") ||
     pathname === "/api/workflows" ||
     pathname.startsWith("/api/workflows/") ||
     pathname === "/api/async-tasks/claim" ||

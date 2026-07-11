@@ -150,6 +150,44 @@ export async function updateTask(
   return data as TaskRecord;
 }
 
+export async function deleteTask(
+  config: AppConfig,
+  taskId: string,
+  force = false
+): Promise<TaskRecord> {
+  const task = await getTask(config, taskId);
+  if (!task) throw new Error("Task not found");
+
+  if (!["draft", "completed", "cancelled"].includes(task.state)) {
+    throw new Error(`Task in ${task.state} state cannot be deleted`);
+  }
+
+  const supabase = getSupabaseClient(config);
+  const links = await listTaskLinks(config, taskId);
+  if (links.length > 0 && !force) {
+    throw new Error("Task has active links; use force to delete links with the task");
+  }
+
+  if (links.length > 0) {
+    const { error: linksError } = await supabase
+      .from(LINKS_TABLE)
+      .delete()
+      .or(`from_task_id.eq.${taskId},to_task_id.eq.${taskId}`);
+    if (linksError) throw new Error(`Failed to delete task links: ${linksError.message}`);
+  }
+
+  const { error: eventsError } = await supabase
+    .from(EVENTS_TABLE)
+    .delete()
+    .eq("task_id", taskId);
+  if (eventsError) throw new Error(`Failed to delete task events: ${eventsError.message}`);
+
+  const { error } = await supabase.from(TASKS_TABLE).delete().eq("id", taskId);
+  if (error) throw new Error(`Failed to delete task: ${error.message}`);
+
+  return task;
+}
+
 export async function listTaskLinks(config: AppConfig, taskId: string): Promise<TaskLinkRecord[]> {
   const supabase = getSupabaseClient(config);
   const { data, error } = await supabase
@@ -168,6 +206,16 @@ export async function createTaskLink(
   fromTaskId: string,
   input: CreateTaskLinkInput
 ): Promise<TaskLinkRecord> {
+  if (fromTaskId === input.to_task_id) {
+    throw new Error("A task cannot link to itself");
+  }
+
+  const [fromTask, toTask] = await Promise.all([
+    getTask(config, fromTaskId),
+    getTask(config, input.to_task_id)
+  ]);
+  if (!fromTask || !toTask) throw new Error("Task not found");
+
   const supabase = getSupabaseClient(config);
 
   const { data: existing, error: existingError } = await supabase
@@ -204,6 +252,39 @@ export async function createTaskLink(
   });
 
   return data as TaskLinkRecord;
+}
+
+export async function deleteTaskLink(
+  config: AppConfig,
+  linkId: string
+): Promise<TaskLinkRecord> {
+  const supabase = getSupabaseClient(config);
+  const { data: current, error: currentError } = await supabase
+    .from(LINKS_TABLE)
+    .select("*")
+    .eq("id", linkId)
+    .eq("status", "active")
+    .maybeSingle();
+  if (currentError) throw new Error(`Failed to get task link: ${currentError.message}`);
+  if (!current) throw new Error("Task link not found");
+
+  const { data, error } = await supabase
+    .from(LINKS_TABLE)
+    .update({ status: "inactive" })
+    .eq("id", linkId)
+    .eq("status", "active")
+    .select("*")
+    .single();
+  if (error) throw new Error(`Failed to delete task link: ${error.message}`);
+
+  const link = data as TaskLinkRecord;
+  await writeTaskEvent(config, {
+    task_id: link.from_task_id,
+    event_type: "link_removed",
+    actor: "user",
+    payload: { link_id: link.id, to_task_id: link.to_task_id, link_type: link.link_type }
+  });
+  return link;
 }
 
 export async function listTaskEvents(config: AppConfig, taskId: string): Promise<TaskEventRecord[]> {

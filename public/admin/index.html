@@ -77,6 +77,15 @@
           </div>
           <button type="submit">Create</button>
         </form>
+
+        <form id="bulkCreateTaskForm" class="stack form-block">
+          <h3>Bulk create tasks</h3>
+          <label>
+            Task array (JSON)
+            <textarea name="tasks_json" rows="8" required placeholder='[{"title":"Task A","task_type":"task","priority":"medium"}]'></textarea>
+          </label>
+          <button type="submit" class="secondary">Create batch</button>
+        </form>
       </section>
 
       <section class="panel main-panel">
@@ -104,6 +113,59 @@
           </div>
         </div>
 
+        <section class="bulk-toolbar" aria-label="Bulk task actions">
+          <div class="bulk-toolbar-heading">
+            <label class="inline-check">
+              <input id="selectAllTasks" type="checkbox" />
+              Select visible
+            </label>
+            <strong id="selectedTaskCount">0 selected</strong>
+          </div>
+          <div class="bulk-action-grid">
+            <label>
+              Priority
+              <select id="bulkPriority">
+                <option value="">No change</option>
+                <option value="low">low</option>
+                <option value="medium">medium</option>
+                <option value="high">high</option>
+                <option value="urgent">urgent</option>
+              </select>
+            </label>
+            <button id="bulkUpdateButton" type="button" class="secondary">Apply update</button>
+            <label>
+              Transition
+              <select id="bulkTransition">
+                <option value="SUBMIT">SUBMIT</option>
+                <option value="RUN_AGENT">RUN_AGENT</option>
+                <option value="BLOCK">BLOCK</option>
+                <option value="UNBLOCK">UNBLOCK</option>
+                <option value="CANCEL">CANCEL</option>
+              </select>
+            </label>
+            <button id="bulkTransitionButton" type="button" class="secondary">Apply transition</button>
+          </div>
+          <div class="bulk-action-grid bulk-link-grid">
+            <label>
+              Link target task ID
+              <input id="bulkLinkTarget" placeholder="task_xxx" />
+            </label>
+            <label>
+              Link type
+              <select id="bulkLinkType">
+                <option value="depends_on">depends_on</option>
+                <option value="blocks">blocks</option>
+                <option value="relates_to">relates_to</option>
+                <option value="parent_child">parent_child</option>
+                <option value="implements">implements</option>
+                <option value="validates">validates</option>
+              </select>
+            </label>
+            <button id="bulkLinkButton" type="button" class="secondary">Link selected</button>
+            <button id="bulkDeleteButton" type="button" class="danger">Delete selected</button>
+          </div>
+        </section>
+
         <div id="tasksList" class="tasks-list"></div>
       </section>
 
@@ -112,10 +174,58 @@
           Select a task to inspect workflow, links, and timeline.
         </div>
       </aside>
+
+      <section class="panel workflow-panel">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Orchestration</p>
+            <h2>Workflows</h2>
+          </div>
+          <button id="refreshWorkflowsButton" type="button" class="secondary">Refresh workflows</button>
+        </div>
+
+        <form id="createWorkflowForm" class="workflow-create-grid">
+          <label>
+            Name
+            <input name="name" required placeholder="Repository change workflow" />
+          </label>
+          <label>
+            Source
+            <select name="source">
+              <option value="web">web</option>
+              <option value="chatgpt">chatgpt</option>
+              <option value="system">system</option>
+            </select>
+          </label>
+          <label>
+            First task
+            <select name="first_task_type">
+              <option value="analyze_repo">analyze_repo</option>
+              <option value="plan_changes">plan_changes</option>
+              <option value="modify_code">modify_code</option>
+              <option value="create_pr">create_pr</option>
+              <option value="wait_github_ci">wait_github_ci</option>
+              <option value="fix_ci">fix_ci</option>
+              <option value="final_report">final_report</option>
+            </select>
+          </label>
+          <label class="workflow-input-field">
+            Input JSON
+            <textarea name="input_json" rows="3" placeholder='{"repo":"owner/name","branch":"feature/example"}'></textarea>
+          </label>
+          <button type="submit">Create workflow</button>
+        </form>
+
+        <div class="workflow-layout">
+          <div id="workflowsList" class="workflow-list"></div>
+          <div id="workflowDetail" class="empty-state">Select a workflow to manage it.</div>
+        </div>
+      </section>
     </main>
 
     <div id="toast" class="toast" hidden></div>
 
     <script src="/admin/app.js" type="module"></script>
+    <script src="/admin/bulk.js" type="module"></script>
   </body>
 </html>

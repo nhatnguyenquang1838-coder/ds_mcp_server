@@ -2,6 +2,12 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { z, ZodError } from "zod";
 import type { AppConfig } from "../config.js";
 import {
+  bulkCreateTaskLinksSchema,
+  bulkCreateTasksSchema,
+  bulkDeleteTaskLinksSchema,
+  bulkDeleteTasksSchema,
+  bulkTransitionTasksSchema,
+  bulkUpdateTasksSchema,
   createTaskLinkSchema,
   createTaskSchema,
   transitionTaskSchema,
@@ -10,6 +16,8 @@ import {
 import {
   createTask,
   createTaskLink,
+  deleteTask,
+  deleteTaskLink,
   getTask,
   listTaskEvents,
   listTaskLinks,
@@ -19,17 +27,25 @@ import {
 } from "./taskStore.js";
 import { availableTaskTransitions } from "./taskMachine.js";
 import {
+  bulkAddAsyncWorkflowTasksSchema,
+  bulkRemoveAsyncWorkflowTasksSchema,
   claimAsyncTaskSchema,
   createAsyncWorkflowSchema,
   githubCiEventSchema,
-  submitAsyncTaskResultSchema
+  submitAsyncTaskResultSchema,
+  updateAsyncWorkflowSchema
 } from "../asyncWorkflowSchemas.js";
 import {
+  addAsyncWorkflowTasks,
   claimAsyncTask,
   createAsyncWorkflow,
+  deleteAsyncWorkflow,
   getAsyncWorkflow,
   handleGithubCiEvent,
-  submitAsyncTaskResult
+  listAsyncWorkflows,
+  removeAsyncWorkflowTasks,
+  submitAsyncTaskResult,
+  updateAsyncWorkflow
 } from "../asyncWorkflowStore.js";
 import { getOrchestrationDashboardSnapshot } from "../dashboard/orchestrationDashboard.js";
 import { listAgentHealth, listAgents, recordAgentHeartbeat, registerAgent } from "../agents/agentRegistry.js";
@@ -120,13 +136,60 @@ function queryPositiveInt(url: URL, name: string, fallback: number): number {
 
 function apiErrorStatus(error: Error): number {
   if (error.message.includes("not configured")) return 500;
-  if (error.message.includes("not found") || error.message.includes("not found")) return 404;
-  if (error.message.includes("Invalid transition") || error.message.includes("open blockers")) return 409;
+  if (error.message.includes("not found")) return 404;
+  if (
+    error.message.includes("Invalid transition") ||
+    error.message.includes("open blockers") ||
+    error.message.includes("cannot be deleted") ||
+    error.message.includes("cannot be removed") ||
+    error.message.includes("has active links") ||
+    error.message.includes("has tasks") ||
+    error.message.includes("active task")
+  ) return 409;
   return 400;
+}
+
+type BatchResult = {
+  index: number;
+  ok: boolean;
+  id?: string;
+  value?: unknown;
+  error?: string;
+};
+
+async function runBatch<T>(
+  items: T[],
+  operation: (item: T, index: number) => Promise<{ id?: string; value?: unknown }>
+): Promise<{ ok: boolean; succeeded: number; failed: number; results: BatchResult[] }> {
+  const results: BatchResult[] = [];
+  for (let index = 0; index < items.length; index += 1) {
+    try {
+      const output = await operation(items[index]!, index);
+      results.push({ index, ok: true, ...output });
+    } catch (error) {
+      results.push({
+        index,
+        ok: false,
+        error: error instanceof Error ? error.message : "Batch operation failed"
+      });
+    }
+  }
+  const succeeded = results.filter((result) => result.ok).length;
+  return {
+    ok: succeeded === results.length,
+    succeeded,
+    failed: results.length - succeeded,
+    results
+  };
+}
+
+function batchStatus(result: { ok: boolean }): number {
+  return result.ok ? 200 : 207;
 }
 
 function isAgentOpsPath(pathname: string): boolean {
   return pathname.startsWith("/api/tasks") ||
+    pathname.startsWith("/api/task-links") ||
     pathname.startsWith("/api/workflows") ||
     pathname.startsWith("/api/async-tasks") ||
     pathname.startsWith("/api/dashboard") ||
@@ -256,10 +319,33 @@ export async function handleAgentOpsRestApi(
       return true;
     }
 
+    if (req.method === "GET" && url.pathname === "/api/workflows") {
+      sendJson(res, 200, { ok: true, workflows: await listAsyncWorkflows(config, queryLimit(url, 100)) });
+      return true;
+    }
+
     if (req.method === "POST" && url.pathname === "/api/workflows") {
       const body = createAsyncWorkflowSchema.parse(await readJsonBody(req));
       const output = await createAsyncWorkflow(config, body);
       sendJson(res, 202, { ok: true, workflow: output.workflow, current_task: output.task });
+      return true;
+    }
+
+    const workflowTasksBulkMatch = url.pathname.match(/^\/api\/workflows\/([^/]+)\/tasks\/bulk$/);
+
+    if (workflowTasksBulkMatch && req.method === "POST") {
+      const workflowId = decodePathValue(workflowTasksBulkMatch[1]);
+      const body = bulkAddAsyncWorkflowTasksSchema.parse(await readJsonBody(req));
+      const workflowTasks = await addAsyncWorkflowTasks(config, workflowId, body.tasks);
+      sendJson(res, 201, { ok: true, tasks: workflowTasks });
+      return true;
+    }
+
+    if (workflowTasksBulkMatch && req.method === "DELETE") {
+      const workflowId = decodePathValue(workflowTasksBulkMatch[1]);
+      const body = bulkRemoveAsyncWorkflowTasksSchema.parse(await readJsonBody(req));
+      const workflowTasks = await removeAsyncWorkflowTasks(config, workflowId, body.task_ids);
+      sendJson(res, 200, { ok: true, tasks: workflowTasks });
       return true;
     }
 
@@ -272,6 +358,29 @@ export async function handleAgentOpsRestApi(
         return true;
       }
       sendJson(res, 200, { ok: true, ...output });
+      return true;
+    }
+
+    if (req.method === "PATCH" && workflowMatch) {
+      const workflowId = decodePathValue(workflowMatch[1]);
+      const body = updateAsyncWorkflowSchema.parse(await readJsonBody(req));
+      const workflow = await updateAsyncWorkflow(config, workflowId, body);
+      if (!workflow) {
+        sendJson(res, 404, { error: "Workflow not found" });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, workflow });
+      return true;
+    }
+
+    if (req.method === "DELETE" && workflowMatch) {
+      const workflowId = decodePathValue(workflowMatch[1]);
+      const workflow = await deleteAsyncWorkflow(config, workflowId, url.searchParams.get("force") === "true");
+      if (!workflow) {
+        sendJson(res, 404, { error: "Workflow not found" });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, workflow });
       return true;
     }
 
@@ -340,6 +449,46 @@ export async function handleAgentOpsRestApi(
       return true;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/tasks/bulk") {
+      const body = bulkCreateTasksSchema.parse(await readJsonBody(req));
+      const result = await runBatch(body.tasks, async (item) => {
+        const task = await createTask(config, item);
+        return { id: task.id, value: task };
+      });
+      sendJson(res, batchStatus(result), result);
+      return true;
+    }
+
+    if (req.method === "PATCH" && url.pathname === "/api/tasks/bulk") {
+      const body = bulkUpdateTasksSchema.parse(await readJsonBody(req));
+      const result = await runBatch(body.task_ids, async (taskId) => {
+        const task = await updateTask(config, taskId, body.patch);
+        return { id: task.id, value: task };
+      });
+      sendJson(res, batchStatus(result), result);
+      return true;
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/api/tasks/bulk") {
+      const body = bulkDeleteTasksSchema.parse(await readJsonBody(req));
+      const result = await runBatch(body.task_ids, async (taskId) => {
+        const task = await deleteTask(config, taskId, body.force);
+        return { id: task.id, value: task };
+      });
+      sendJson(res, batchStatus(result), result);
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/tasks/bulk/transitions") {
+      const body = bulkTransitionTasksSchema.parse(await readJsonBody(req));
+      const result = await runBatch(body.task_ids, async (taskId) => {
+        const output = await transitionTask(config, taskId, body.transition);
+        return { id: taskId, value: output };
+      });
+      sendJson(res, batchStatus(result), result);
+      return true;
+    }
+
     const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
 
     if (taskMatch && req.method === "GET") {
@@ -361,6 +510,37 @@ export async function handleAgentOpsRestApi(
       return true;
     }
 
+    if (taskMatch && req.method === "DELETE") {
+      const taskId = decodePathValue(taskMatch[1]);
+      const task = await deleteTask(config, taskId, url.searchParams.get("force") === "true");
+      sendJson(res, 200, { ok: true, task });
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/task-links/bulk") {
+      const body = bulkCreateTaskLinksSchema.parse(await readJsonBody(req));
+      const result = await runBatch(body.links, async (item) => {
+        const link = await createTaskLink(config, item.from_task_id, {
+          to_task_id: item.to_task_id,
+          link_type: item.link_type,
+          created_by: item.created_by
+        });
+        return { id: link.id, value: link };
+      });
+      sendJson(res, batchStatus(result), result);
+      return true;
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/api/task-links/bulk") {
+      const body = bulkDeleteTaskLinksSchema.parse(await readJsonBody(req));
+      const result = await runBatch(body.link_ids, async (linkId) => {
+        const link = await deleteTaskLink(config, linkId);
+        return { id: link.id, value: link };
+      });
+      sendJson(res, batchStatus(result), result);
+      return true;
+    }
+
     const linksMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/links$/);
 
     if (linksMatch && req.method === "GET") {
@@ -374,6 +554,14 @@ export async function handleAgentOpsRestApi(
       const body = createTaskLinkSchema.parse(await readJsonBody(req));
       const link = await createTaskLink(config, taskId, body);
       sendJson(res, 201, { ok: true, link });
+      return true;
+    }
+
+    const linkDeleteMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)\/links\/([^/]+)$/);
+
+    if (linkDeleteMatch && req.method === "DELETE") {
+      const link = await deleteTaskLink(config, decodePathValue(linkDeleteMatch[2]));
+      sendJson(res, 200, { ok: true, link });
       return true;
     }
 

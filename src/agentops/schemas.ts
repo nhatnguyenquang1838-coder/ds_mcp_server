@@ -68,6 +68,47 @@ export const transitionTaskSchema = z.object({
   idempotency_key: z.string().min(1).max(200).optional()
 });
 
+const uniqueIdsSchema = z.array(z.string().min(1)).min(1).max(100).refine(
+  (ids) => new Set(ids).size === ids.length,
+  { message: "IDs must be unique" }
+);
+
+export const bulkCreateTasksSchema = z.object({
+  tasks: z.array(createTaskSchema).min(1).max(100)
+});
+
+export const bulkUpdateTasksSchema = z.object({
+  task_ids: uniqueIdsSchema,
+  patch: updateTaskSchema.refine((value) => Object.keys(value).length > 0, {
+    message: "patch must include at least one field"
+  })
+});
+
+export const bulkDeleteTasksSchema = z.object({
+  task_ids: uniqueIdsSchema,
+  force: z.boolean().default(false)
+});
+
+export const bulkTransitionTasksSchema = z.object({
+  task_ids: uniqueIdsSchema,
+  transition: transitionTaskSchema.omit({ idempotency_key: true })
+});
+
+export const bulkCreateTaskLinksSchema = z.object({
+  links: z.array(z.object({
+    from_task_id: z.string().min(1),
+    to_task_id: z.string().min(1),
+    link_type: createTaskLinkSchema.shape.link_type,
+    created_by: z.string().optional()
+  }).refine((link) => link.from_task_id !== link.to_task_id, {
+    message: "A task cannot link to itself"
+  })).min(1).max(100)
+});
+
+export const bulkDeleteTaskLinksSchema = z.object({
+  link_ids: uniqueIdsSchema
+});
+
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export type UpdateTaskInput = z.infer<typeof updateTaskSchema>;
 export type CreateTaskLinkInput = z.infer<typeof createTaskLinkSchema>;

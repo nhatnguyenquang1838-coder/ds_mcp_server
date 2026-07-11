@@ -17,6 +17,30 @@ export const createAsyncWorkflowSchema = z.object({
   first_task_type: asyncTaskTypeSchema.default("analyze_repo")
 });
 
+export const updateAsyncWorkflowSchema = z.object({
+  name: z.string().min(1).optional(),
+  input: z.record(z.unknown()).optional()
+}).refine((input) => Object.keys(input).length > 0, {
+  message: "At least one workflow field is required"
+});
+
+export const bulkAddAsyncWorkflowTasksSchema = z.object({
+  tasks: z.array(z.object({
+    type: asyncTaskTypeSchema,
+    payload_json: z.record(z.unknown()).default({}),
+    parent_task_id: z.string().min(1).optional(),
+    status: z.enum(["queued", "waiting_external"]).default("queued"),
+    wait_key: z.string().min(1).optional()
+  })).min(1).max(100)
+});
+
+export const bulkRemoveAsyncWorkflowTasksSchema = z.object({
+  task_ids: z.array(z.string().min(1)).min(1).max(100).refine(
+    (ids) => new Set(ids).size === ids.length,
+    { message: "Task IDs must be unique" }
+  )
+});
+
 export const claimAsyncTaskSchema = z.object({
   agent_id: z.string().min(1),
   capabilities: z.array(asyncTaskTypeSchema).min(1),

@@ -5,11 +5,15 @@ import {
   claimNextTaskRecord,
   createTaskRecord,
   createWorkflowRecord,
+  deleteTaskRecords,
+  deleteWorkflowRecord,
   findWaitingGithubTasks,
   getWorkflowRecord,
+  listWorkflowRecords,
   markWebhookDeliveryProcessed,
   recordWebhookDelivery,
-  updateTaskResultRecord
+  updateTaskResultRecord,
+  updateWorkflowRecord
 } from "./repositories/orchestrationRepository.js";
 import { claimFilterSnapshot, taskMatchesClaimFilters } from "./agentops/claimTargeting.js";
 import { applyTaskResultTransition } from "./state/stateEngine.js";
@@ -195,6 +199,144 @@ export async function getAsyncWorkflow(config: AppConfig, id: string): Promise<{
     tasks: [...tasks.values()].filter((task) => task.workflow_id === id),
     events: events.filter((event) => event.workflow_id === id)
   };
+}
+
+export async function listAsyncWorkflows(config: AppConfig, limit = 100): Promise<AsyncWorkflow[]> {
+  if (isSupabaseConfigured(config)) {
+    return listWorkflowRecords(config, limit);
+  }
+
+  return [...workflows.values()]
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+    .slice(0, Math.min(Math.max(limit, 1), 200));
+}
+
+export async function updateAsyncWorkflow(
+  config: AppConfig,
+  workflowId: string,
+  input: { name?: string; input?: Record<string, unknown> }
+): Promise<AsyncWorkflow | undefined> {
+  if (isSupabaseConfigured(config)) {
+    return updateWorkflowRecord(config, workflowId, input);
+  }
+
+  const workflow = workflows.get(workflowId);
+  if (!workflow) return undefined;
+  if (input.name !== undefined) workflow.name = input.name;
+  if (input.input !== undefined) workflow.context_json = input.input;
+  workflow.updated_at = now();
+  workflows.set(workflowId, workflow);
+  appendMemoryEvent({
+    workflow_id: workflowId,
+    event_type: "workflow_updated",
+    actor: "web",
+    data_json: input
+  });
+  return workflow;
+}
+
+export async function deleteAsyncWorkflow(
+  config: AppConfig,
+  workflowId: string,
+  force = false
+): Promise<AsyncWorkflow | undefined> {
+  if (isSupabaseConfigured(config)) {
+    return deleteWorkflowRecord(config, workflowId, force);
+  }
+
+  const workflow = workflows.get(workflowId);
+  if (!workflow) return undefined;
+  const workflowTasks = [...tasks.values()].filter((task) => task.workflow_id === workflowId);
+  const activeTask = workflowTasks.find((task) => ["leased", "running"].includes(task.status));
+  if (activeTask) throw new Error(`Workflow has active task ${activeTask.id} in ${activeTask.status} state`);
+  if (workflowTasks.length > 0 && !force) {
+    throw new Error("Workflow has tasks; use force to delete the workflow and removable tasks");
+  }
+
+  for (const task of workflowTasks) tasks.delete(task.id);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index]?.workflow_id === workflowId) events.splice(index, 1);
+  }
+  workflows.delete(workflowId);
+  return workflow;
+}
+
+export async function addAsyncWorkflowTasks(
+  config: AppConfig,
+  workflowId: string,
+  inputs: Array<{
+    type: AsyncTaskType;
+    payload_json?: Record<string, unknown>;
+    parent_task_id?: string;
+    status?: "queued" | "waiting_external";
+    wait_key?: string;
+  }>
+): Promise<AsyncTask[]> {
+  const current = await getAsyncWorkflow(config, workflowId);
+  if (!current) throw new Error("Workflow not found");
+  if (["succeeded", "failed", "cancelled"].includes(current.workflow.status)) {
+    throw new Error(`Workflow in ${current.workflow.status} state cannot accept tasks`);
+  }
+
+  const existingTaskIds = new Set(current.tasks.map((task) => task.id));
+  for (const input of inputs) {
+    if (input.parent_task_id && !existingTaskIds.has(input.parent_task_id)) {
+      throw new Error(`Parent task ${input.parent_task_id} does not belong to workflow`);
+    }
+  }
+
+  const created: AsyncTask[] = [];
+  for (const input of inputs) {
+    const task = isSupabaseConfigured(config)
+      ? await createTaskRecord(config, {
+          workflow_id: workflowId,
+          parent_task_id: input.parent_task_id,
+          type: input.type,
+          status: input.status,
+          payload_json: input.payload_json,
+          wait_key: input.wait_key
+        })
+      : createMemoryTask({
+          workflow_id: workflowId,
+          parent_task_id: input.parent_task_id,
+          type: input.type,
+          status: input.status,
+          payload_json: input.payload_json,
+          wait_key: input.wait_key
+        });
+    created.push(task);
+  }
+  return created;
+}
+
+export async function removeAsyncWorkflowTasks(
+  config: AppConfig,
+  workflowId: string,
+  taskIds: string[]
+): Promise<AsyncTask[]> {
+  if (isSupabaseConfigured(config)) {
+    return deleteTaskRecords(config, workflowId, taskIds);
+  }
+
+  const matched = taskIds.map((taskId) => tasks.get(taskId));
+  if (matched.some((task) => !task || task.workflow_id !== workflowId)) {
+    throw new Error("One or more workflow tasks were not found");
+  }
+  const records = matched as AsyncTask[];
+  const protectedTask = records.find((task) => !["queued", "waiting_external"].includes(task.status));
+  if (protectedTask) {
+    throw new Error(`Workflow task ${protectedTask.id} in ${protectedTask.status} state cannot be removed`);
+  }
+
+  for (const task of records) tasks.delete(task.id);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (events[index]?.task_id && taskIds.includes(events[index]!.task_id!)) events.splice(index, 1);
+  }
+  const remaining = [...tasks.values()]
+    .filter((task) => task.workflow_id === workflowId)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  setMemoryWorkflowCurrentTask(workflowId, remaining[0]?.id);
+  return records;
 }
 
 export async function claimAsyncTask(config: AppConfig, input: AsyncTaskClaimInput): Promise<AsyncTask | undefined> {

@@ -293,13 +293,19 @@ function renderTaskDetail(task, transitions, links, events) {
     </section>
 
     <section class="detail-section">
-      <h3>Links</h3>
+      <div class="bulk-toolbar-heading">
+        <h3>Links</h3>
+        <button id="bulkDeleteLinksButton" type="button" class="danger">Remove selected</button>
+      </div>
       <div class="link-list">
         ${links.length === 0 ? "<div class=\"event-item\">No links.</div>" : links.map((link) => `
-          <div class="link-item">
-            <strong>${escapeHtml(link.link_type)}</strong><br />
-            ${escapeHtml(link.from_task_id)} -> ${escapeHtml(link.to_task_id)}
-          </div>
+          <label class="link-item selectable-link">
+            <input type="checkbox" data-link-id="${escapeHtml(link.id)}" />
+            <span>
+              <strong>${escapeHtml(link.link_type)}</strong><br />
+              ${escapeHtml(link.from_task_id)} -> ${escapeHtml(link.to_task_id)}
+            </span>
+          </label>
         `).join("")}
       </div>
     </section>
