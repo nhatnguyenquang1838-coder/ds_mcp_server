@@ -449,6 +449,46 @@ export async function handleAgentOpsRestApi(
       return true;
     }
 
+    if (req.method === "POST" && url.pathname === "/api/tasks/bulk") {
+      const body = bulkCreateTasksSchema.parse(await readJsonBody(req));
+      const result = await runBatch(body.tasks, async (item) => {
+        const task = await createTask(config, item);
+        return { id: task.id, value: task };
+      });
+      sendJson(res, batchStatus(result), result);
+      return true;
+    }
+
+    if (req.method === "PATCH" && url.pathname === "/api/tasks/bulk") {
+      const body = bulkUpdateTasksSchema.parse(await readJsonBody(req));
+      const result = await runBatch(body.task_ids, async (taskId) => {
+        const task = await updateTask(config, taskId, body.patch);
+        return { id: task.id, value: task };
+      });
+      sendJson(res, batchStatus(result), result);
+      return true;
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/api/tasks/bulk") {
+      const body = bulkDeleteTasksSchema.parse(await readJsonBody(req));
+      const result = await runBatch(body.task_ids, async (taskId) => {
+        const task = await deleteTask(config, taskId, body.force);
+        return { id: task.id, value: task };
+      });
+      sendJson(res, batchStatus(result), result);
+      return true;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/tasks/bulk/transitions") {
+      const body = bulkTransitionTasksSchema.parse(await readJsonBody(req));
+      const result = await runBatch(body.task_ids, async (taskId) => {
+        const output = await transitionTask(config, taskId, body.transition);
+        return { id: taskId, value: output };
+      });
+      sendJson(res, batchStatus(result), result);
+      return true;
+    }
+
     const taskMatch = url.pathname.match(/^\/api\/tasks\/([^/]+)$/);
 
     if (taskMatch && req.method === "GET") {
