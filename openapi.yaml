@@ -316,6 +316,40 @@ paths:
         "400":
           description: Không thể lấy workflow runs
 
+  /api/github/repos/{owner}/{repo}/integrity-artifacts:
+    get:
+      summary: Generate deterministic GitHub repository integrity artifacts server-side
+      operationId: githubGenerateIntegrityArtifacts
+      x-openai-isConsequential: false
+      parameters:
+        - $ref: "#/components/parameters/Owner"
+        - $ref: "#/components/parameters/Repo"
+        - name: ref
+          in: query
+          required: false
+          description: Branch, tag, or commit SHA. If omitted, the default base branch is used.
+          schema:
+            type: string
+        - name: exclude_path
+          in: query
+          required: false
+          description: Optional path to exclude from SHA256SUMS.txt. Repeat the query parameter for multiple paths. SHA256SUMS.txt and TREE.txt are excluded by default.
+          schema:
+            type: array
+            items:
+              type: string
+          style: form
+          explode: true
+      responses:
+        "200":
+          description: Integrity artifact text generated from Git tree and blob APIs
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GitHubIntegrityArtifacts"
+        "400":
+          description: Cannot generate integrity artifacts
+
   /api/github/repos/{owner}/{repo}/upload-sessions:
     post:
       summary: Tạo upload session để handoff file theo chunk
@@ -663,6 +697,52 @@ components:
         body:
           type: string
       required: [id, html_url, body]
+
+    GitHubIntegritySkippedEntry:
+      type: object
+      properties:
+        path:
+          type: string
+        type:
+          type: string
+        reason:
+          type: string
+        sha:
+          type: string
+      required: [path, type, reason]
+
+    GitHubIntegrityArtifacts:
+      type: object
+      properties:
+        owner:
+          type: string
+        repo:
+          type: string
+        ref:
+          type: string
+        commit_sha:
+          type: string
+          pattern: "^[0-9a-fA-F]{40}$"
+        tree_sha:
+          type: string
+          pattern: "^[0-9a-fA-F]{40}$"
+        tree_truncated:
+          type: boolean
+        excluded_paths:
+          type: array
+          items:
+            type: string
+        included_files:
+          type: integer
+        skipped_entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/GitHubIntegritySkippedEntry"
+        tree_txt:
+          type: string
+        sha256sums_txt:
+          type: string
+      required: [owner, repo, ref, commit_sha, tree_sha, tree_truncated, excluded_paths, included_files, skipped_entries, tree_txt, sha256sums_txt]
 
     GitHubCreateUploadSessionInput:
       type: object
