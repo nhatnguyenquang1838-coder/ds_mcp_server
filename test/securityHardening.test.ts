@@ -125,12 +125,14 @@ test("builds oauth metadata from the configured public base url", () => {
     authorization_endpoint: string;
     token_endpoint: string;
     authorization_response_iss_parameter_supported: boolean;
+    resource_parameter_supported: boolean;
   };
 
   assert.equal(metadata.issuer, "https://example.com");
   assert.equal(metadata.authorization_endpoint, "https://example.com/oauth/authorize");
   assert.equal(metadata.token_endpoint, "https://example.com/oauth/token");
   assert.equal(metadata.authorization_response_iss_parameter_supported, true);
+  assert.equal(metadata.resource_parameter_supported, true);
 });
 
 test("builds protected resource metadata for resource-scoped paths", () => {

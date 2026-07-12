@@ -205,6 +205,7 @@ export function buildOAuthMetadataJson(config: AppConfig, requestBaseUrl: string
       "client_secret_post"
     ],
     authorization_response_iss_parameter_supported: true,
+    resource_parameter_supported: true,
     scopes_supported: [DEFAULT_SCOPE, "offline_access"],
     introspection_endpoint_auth_methods_supported: ["none", "client_secret_basic", "client_secret_post"]
   };

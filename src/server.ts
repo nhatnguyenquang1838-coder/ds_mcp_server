@@ -297,8 +297,10 @@ function renderOAuthConsentPage(input: {
   clientName: string;
   clientId: string;
   redirectUri: string;
+  responseType: string;
   scope: string;
   state?: string;
+  resource?: string;
   codeChallenge: string;
   codeChallengeMethod: string;
   authorizeActionUrl: string;
@@ -332,9 +334,11 @@ function renderOAuthConsentPage(input: {
         <div><strong>Scope:</strong> <code>${escapeHtml(input.scope)}</code></div>
       </div>
       <form method="post" action="${escapeHtml(input.authorizeActionUrl)}">
+        <input type="hidden" name="response_type" value="${escapeHtml(input.responseType)}" />
         <input type="hidden" name="client_id" value="${escapeHtml(input.clientId)}" />
         <input type="hidden" name="redirect_uri" value="${escapeHtml(input.redirectUri)}" />
         <input type="hidden" name="scope" value="${escapeHtml(input.scope)}" />
+        ${input.resource ? `<input type="hidden" name="resource" value="${escapeHtml(input.resource)}" />` : ""}
         <input type="hidden" name="code_challenge" value="${escapeHtml(input.codeChallenge)}" />
         <input type="hidden" name="code_challenge_method" value="${escapeHtml(input.codeChallengeMethod)}" />
         ${input.state ? `<input type="hidden" name="state" value="${escapeHtml(input.state)}" />` : ""}
@@ -482,6 +486,7 @@ async function handleOAuthRequests(
     const clientId = (params.client_id || "").trim();
     const redirectUri = (params.redirect_uri || "").trim();
     const scope = (params.scope || "mcp").trim();
+    const resource = (params.resource || "").trim() || undefined;
     const codeChallenge = (params.code_challenge || "").trim();
     const codeChallengeMethod = (params.code_challenge_method || "S256").trim();
     const state = (params.state || "").trim() || undefined;
@@ -525,8 +530,10 @@ async function handleOAuthRequests(
           clientName: client.client_name,
           clientId,
           redirectUri,
+          responseType,
           scope,
           state,
+          resource,
           codeChallenge,
           codeChallengeMethod,
           authorizeActionUrl: `${resolveOAuthIssuer(config, requestBase)}/oauth/authorize`
