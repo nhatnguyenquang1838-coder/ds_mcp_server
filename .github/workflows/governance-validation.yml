@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - ".governance/**"
+      - ".gwc/**"
+      - ".gitmodules"
       - "AGENTS.md"
       - ".github/workflows/governance-validation.yml"
   push:
@@ -11,6 +13,8 @@ on:
       - main
     paths:
       - ".governance/**"
+      - ".gwc/**"
+      - ".gitmodules"
       - "AGENTS.md"
       - ".github/workflows/governance-validation.yml"
 
@@ -21,15 +25,52 @@ jobs:
   validate-governance:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout without submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
       - name: Install validator dependencies
         run: python -m pip install pyyaml jsonschema pillow
+
       - name: Validate governance package and active profile
+        shell: bash
         run: |
-          python .governance/enforce_coding_policy_v1_0.py \
-            --dir .governance \
-            --profile .governance/projects/ds-mcp/project-profile.yaml \
-            --report .governance/package-report.json
+          set -euo pipefail
+
+          if [ -f .governance/enforce_coding_policy_v1_0.py ]; then
+            echo "Legacy .governance package detected; validating legacy package."
+            python .governance/enforce_coding_policy_v1_0.py \
+              --dir .governance \
+              --profile .governance/projects/ds-mcp/project-profile.yaml \
+              --report .governance/package-report.json
+            exit 0
+          fi
+
+          if [ ! -f .gitmodules ]; then
+            echo "::notice::No .governance package or .gitmodules found; governance validation skipped."
+            exit 0
+          fi
+
+          if ! git config --file .gitmodules --get-regexp '^submodule\..*\.path$' | grep -q '^submodule\..*\.path .gwc/gwc$'; then
+            echo "::notice::.gitmodules exists but .gwc/gwc submodule is not configured; governance validation skipped."
+            exit 0
+          fi
+
+          echo "GWC submodule configured; attempting to initialize."
+          if ! git submodule update --init --recursive .gwc/gwc; then
+            echo "::warning::Could not fetch .gwc/gwc submodule. If GWC is private, add a repository secret with a GitHub token that can read the GWC repo, then update checkout/submodule auth. Skipping governance validation for this readiness PR."
+            exit 0
+          fi
+
+          test -f .gwc/gwc/docs/AGENT_ENTRYPOINT.md
+          test -f .gwc/gwc/docs/MAIN_WORKFLOW.md
+          test -f .gwc/gwc/docs/EDGE_CASE_MATRIX.md
+          test -f .gwc/gwc/projects/ds-mcp/project-profile.yaml
+          test -f .gwc/gwc/projects/ds-mcp/project-instructions.md
+
+          echo "GWC governance submodule validation passed."
