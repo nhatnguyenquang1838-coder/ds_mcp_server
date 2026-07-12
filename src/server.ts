@@ -31,6 +31,7 @@ import {
   githubReadFile,
   githubUpsertFile
 } from "./tools/githubClient.js";
+import { githubGenerateIntegrityArtifacts } from "./tools/githubIntegrityArtifacts.js";
 import { writeAuditEvent } from "./tools/auditLog.js";
 import {
   completeAgentRun,
@@ -1096,6 +1097,7 @@ function getCapabilities() {
       "github_read_file",
       "github_list_tree",
       "github_read_binary_file",
+      "github_generate_integrity_artifacts",
       "github_create_branch",
       "github_upsert_file",
       "github_create_pr",
@@ -1131,6 +1133,7 @@ function getCapabilities() {
       "/api/github/repos/{owner}/{repo}/files",
       "/api/github/repos/{owner}/{repo}/tree",
       "/api/github/repos/{owner}/{repo}/binary-file",
+      "/api/github/repos/{owner}/{repo}/integrity-artifacts",
       "/api/github/repos/{owner}/{repo}/branches",
       "/api/github/repos/{owner}/{repo}/pull-requests",
       "/api/github/repos/{owner}/{repo}/pull-requests/{pr_number}/comments",
@@ -1576,6 +1579,21 @@ async function handleGitHubRestApi(
           ...repoInput(binaryFileMatch),
           path,
           ref
+        })
+      );
+      return true;
+    }
+
+    const integrityArtifactsMatch = repoRoute(url, "integrity-artifacts");
+
+    if (req.method === "GET" && integrityArtifactsMatch) {
+      sendJson(
+        res,
+        200,
+        await githubGenerateIntegrityArtifacts(config, {
+          ...repoInput(integrityArtifactsMatch),
+          ref: url.searchParams.get("ref") || undefined,
+          exclude_paths: url.searchParams.getAll("exclude_path")
         })
       );
       return true;
