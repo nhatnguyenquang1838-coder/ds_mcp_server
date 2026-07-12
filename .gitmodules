@@ -1,0 +1,3 @@
+[submodule ".gwc/gwc"]
+	path = .gwc/gwc
+	url = https://github.com/nhatnguyenquang1838-coder/gwc.git
