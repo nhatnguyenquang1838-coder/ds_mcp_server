@@ -57,10 +57,18 @@ function isGitHubWebhook(pathname: string): boolean {
   return pathname === "/api/webhooks/github";
 }
 
+function isOAuthProtectedResourcePath(pathname: string): boolean {
+  return (
+    pathname === "/.well-known/oauth-protected-resource" ||
+    pathname.startsWith("/.well-known/oauth-protected-resource/") ||
+    pathname.endsWith("/.well-known/oauth-protected-resource")
+  );
+}
+
 function isOAuthPath(pathname: string): boolean {
   return (
     pathname === "/.well-known/oauth-authorization-server" ||
-    pathname === "/.well-known/oauth-protected-resource" ||
+    isOAuthProtectedResourcePath(pathname) ||
     pathname === "/.well-known/openid-configuration" ||
     pathname === "/oauth/register" ||
     pathname === "/oauth/authorize" ||

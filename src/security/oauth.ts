@@ -211,11 +211,15 @@ export function buildOAuthMetadataJson(config: AppConfig, requestBaseUrl: string
 
 export function buildOAuthProtectedResourceJson(
   config: AppConfig,
-  requestBaseUrl: string
+  requestBaseUrl: string,
+  resourcePath = ""
 ): unknown {
   const metadata = buildOAuthMetadata(config, requestBaseUrl);
+  const normalizedResourcePath = resourcePath
+    ? `/${resourcePath.replace(/^\/+/, "").replace(/\/+$/, "")}`
+    : "";
   return {
-    resource: metadata.protectedResourceMetadata.resource,
+    resource: `${metadata.protectedResourceMetadata.resource}${normalizedResourcePath}`,
     authorization_servers: metadata.protectedResourceMetadata.authorization_servers,
     bearer_methods_supported: metadata.protectedResourceMetadata.bearer_methods_supported
   };

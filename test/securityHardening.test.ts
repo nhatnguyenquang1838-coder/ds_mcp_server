@@ -4,7 +4,10 @@ import test from "node:test";
 
 import { loadConfig, type AppConfig } from "../src/config.js";
 import { authorizeRoute } from "../src/security/auth.js";
-import { buildOAuthMetadataJson } from "../src/security/oauth.js";
+import {
+  buildOAuthMetadataJson,
+  buildOAuthProtectedResourceJson
+} from "../src/security/oauth.js";
 import { buildSecurityPosture } from "../src/security/posture.js";
 import {
   acquireRateLimit,
@@ -126,6 +129,29 @@ test("builds oauth metadata from the configured public base url", () => {
   assert.equal(metadata.issuer, "https://example.com");
   assert.equal(metadata.authorization_endpoint, "https://example.com/oauth/authorize");
   assert.equal(metadata.token_endpoint, "https://example.com/oauth/token");
+});
+
+test("builds protected resource metadata for resource-scoped paths", () => {
+  const config = {
+    ...baseConfig(),
+    publicBaseUrl: "https://example.com"
+  };
+
+  const metadata = buildOAuthMetadataJson(config, "http://localhost:8787");
+  assert.ok(metadata);
+
+  const protectedMetadata = buildOAuthProtectedResourceJson(config, "http://localhost:8787", "mcp") as {
+    resource: string;
+  };
+  assert.equal(protectedMetadata.resource, "https://example.com/mcp");
+});
+
+test("treats resource-scoped protected resource metadata routes as public", () => {
+  const rootScoped = resolveRoutePolicy("GET", "/.well-known/oauth-protected-resource/mcp");
+  assert.equal(rootScoped.policy, "public");
+
+  const suffixScoped = resolveRoutePolicy("GET", "/mcp/.well-known/oauth-protected-resource");
+  assert.equal(suffixScoped.policy, "public");
 });
 
 test("builds security posture snapshots", () => {

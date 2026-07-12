@@ -273,6 +273,24 @@ function oauthErrorResponse(
   );
 }
 
+function oauthProtectedResourcePath(pathname: string): string | undefined {
+  if (pathname === "/.well-known/oauth-protected-resource") {
+    return "";
+  }
+
+  const prefix = "/.well-known/oauth-protected-resource/";
+  if (pathname.startsWith(prefix)) {
+    return pathname.slice(prefix.length);
+  }
+
+  const suffix = "/.well-known/oauth-protected-resource";
+  if (pathname.endsWith(suffix)) {
+    return pathname.slice(0, -suffix.length).replace(/^\/+/, "");
+  }
+
+  return undefined;
+}
+
 function renderOAuthConsentPage(input: {
   clientName: string;
   clientId: string;
@@ -382,11 +400,12 @@ async function handleOAuthRequests(
     return true;
   }
 
-  if (pathname === "/.well-known/oauth-protected-resource") {
+  const protectedResourcePath = oauthProtectedResourcePath(pathname);
+  if (protectedResourcePath !== undefined) {
     sendJson(
       res,
       200,
-      buildOAuthProtectedResourceJson(config, requestBase),
+      buildOAuthProtectedResourceJson(config, requestBase, protectedResourcePath),
       { "Cache-Control": "no-store", "X-Request-Id": requestId(req) }
     );
     return true;
