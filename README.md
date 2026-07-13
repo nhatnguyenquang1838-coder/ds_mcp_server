@@ -449,6 +449,19 @@ npm run build      # compile to dist
 npm start          # run compiled server
 ```
 
+Env ops:
+
+```bash
+npm run env:ops -- audit
+npm run env:ops -- plan-rotate --vars=DS_MCP_MCP_BEARER_TOKEN,DS_MCP_REST_API_BEARER_TOKEN
+npm run env:ops -- write-local --vars=DS_MCP_MCP_BEARER_TOKEN
+npm run vercel:env-ops -- --all-secrets --execute
+```
+
+The Vercel rotation tool is interactive and requires a linked Vercel project
+(`vercel link`) or an explicit project context before it can run destructive
+changes.
+
 ## Production notes
 
 Minimum controls before production:

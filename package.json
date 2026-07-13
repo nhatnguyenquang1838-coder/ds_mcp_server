@@ -10,7 +10,9 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "tsx --test test/*.test.ts",
-    "setup:local": "node scripts/setup-local-env.js"
+    "setup:local": "node scripts/setup-local-env.js",
+    "env:ops": "node scripts/env-ops.js",
+    "vercel:env-ops": "node scripts/vercel-env-ops.js"
   },
   "engines": {
     "node": ">=20.0.0"
