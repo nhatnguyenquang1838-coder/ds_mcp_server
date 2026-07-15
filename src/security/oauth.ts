@@ -101,8 +101,45 @@ export type OAuthTokenExchangeResult =
       error_description?: string;
     };
 
+export type OAuthCallbackFailureDetails = {
+  error?: string;
+  errorCode?: string;
+  errorDescription?: string;
+  stateParamPresent?: boolean;
+  expectedStatePresent?: boolean;
+  codePresent?: boolean;
+};
+
 function nowIso(): string {
   return new Date().toISOString();
+}
+
+export function formatAdminOAuthCallbackFailure(details: OAuthCallbackFailureDetails): string {
+  const errorParts: string[] = [];
+
+  if (details.error) {
+    errorParts.push(details.error);
+  }
+  if (details.errorCode && details.errorCode !== details.error) {
+    errorParts.push(details.errorCode);
+  }
+
+  const errorLabel = errorParts.length > 0 ? errorParts.join(" / ") : undefined;
+  const description = details.errorDescription?.trim();
+
+  if (errorLabel) {
+    const suffix = description ? `: ${description}` : "";
+    if (details.errorCode === "bad_oauth_state") {
+      return `${errorLabel}${suffix}. This usually means the Supabase Auth callback lost its cookies. Try incognito mode or allow cookies for supabase.co.`;
+    }
+    return `${errorLabel}${suffix}`;
+  }
+
+  if (!details.stateParamPresent || !details.expectedStatePresent || !details.codePresent) {
+    return "Invalid or missing state.";
+  }
+
+  return "OAuth login failed.";
 }
 
 function normalizeBaseUrl(value: string): string {

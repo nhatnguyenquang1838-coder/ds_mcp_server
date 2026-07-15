@@ -8,6 +8,7 @@ import {
   buildAdminOAuthRedirectUri,
   buildOAuthMetadataJson,
   buildOAuthProtectedResourceJson,
+  formatAdminOAuthCallbackFailure,
   isRefreshTokenExpired,
   refreshTokenExpiresAtIso
 } from "../src/security/oauth.js";
@@ -186,6 +187,28 @@ test("uses the canonical production base url when the request base looks local",
   assert.equal(
     buildAdminOAuthRedirectUri(config, "http://localhost:8787"),
     "https://ds-mcp-server-one.vercel.app/api/admin/oauth/callback"
+  );
+});
+
+test("formats supabase oauth callback errors with actionable guidance", () => {
+  assert.equal(
+    formatAdminOAuthCallbackFailure({
+      error: "invalid_request",
+      errorCode: "bad_oauth_state",
+      errorDescription: "OAuth state not found or expired"
+    }),
+    "invalid_request / bad_oauth_state: OAuth state not found or expired. This usually means the Supabase Auth callback lost its cookies. Try incognito mode or allow cookies for supabase.co."
+  );
+});
+
+test("falls back to the generic missing state message when no upstream error is present", () => {
+  assert.equal(
+    formatAdminOAuthCallbackFailure({
+      stateParamPresent: false,
+      expectedStatePresent: true,
+      codePresent: false
+    }),
+    "Invalid or missing state."
   );
 });
 

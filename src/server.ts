@@ -54,6 +54,7 @@ import {
   buildOAuthMetadataJson,
   buildOAuthProtectedResourceJson,
   buildAdminOAuthRedirectUri,
+  formatAdminOAuthCallbackFailure,
   createOAuthAuthorizationCode,
   exchangeOAuthAuthorizationCode,
   getOAuthClientRecord,
@@ -1989,6 +1990,9 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
       const codeVerifier = cookies.dw_agentops_admin_oauth_verifier;
       const stateParam = url.searchParams.get("state") || "";
       const code = url.searchParams.get("code") || "";
+      const error = url.searchParams.get("error") || "";
+      const errorCode = url.searchParams.get("error_code") || "";
+      const errorDescription = url.searchParams.get("error_description") || "";
       logAdminOauthDebug("callback", {
         requestId: requestId(req),
         host: firstHeader(req.headers.host),
@@ -1999,6 +2003,9 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
         stateParamPresent: Boolean(stateParam),
         stateMatch: Boolean(expectedState && stateParam && stateParam === expectedState),
         codePresent: Boolean(code),
+        errorPresent: Boolean(error),
+        errorCode: errorCode || undefined,
+        errorDescription: errorDescription || undefined,
         callbackUrl: url.toString()
       });
       if (!expectedState || !codeVerifier || !stateParam || stateParam !== expectedState) {
@@ -2007,9 +2014,25 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
           expectedStatePresent: Boolean(expectedState),
           codeVerifierPresent: Boolean(codeVerifier),
           stateParam,
+          error: error || undefined,
+          errorCode: errorCode || undefined,
+          errorDescription: errorDescription || undefined,
           cookieHeaderPresent: Boolean(firstHeader(req.headers.cookie))
         });
-        sendHtml(res, 400, "<h1>OAuth login failed</h1><p>Invalid or missing state.</p>");
+        sendHtml(
+          res,
+          400,
+          `<h1>OAuth login failed</h1><p>${escapeHtml(
+            formatAdminOAuthCallbackFailure({
+              error: error || undefined,
+              errorCode: errorCode || undefined,
+              errorDescription: errorDescription || undefined,
+              stateParamPresent: Boolean(stateParam),
+              expectedStatePresent: Boolean(expectedState),
+              codePresent: Boolean(code)
+            })
+          )}</p>`
+        );
         return true;
       }
 
