@@ -4,6 +4,7 @@ const state = {
   links: [],
   linksError: null,
   selectedTaskId: null,
+  token: "",
   user: null,
   authState: "logged_out",
   security: null,
@@ -17,6 +18,9 @@ const state = {
 const elements = {
   loginScreen: document.querySelector("#loginScreen"),
   appShell: document.querySelector("#appShell"),
+  loginForm: document.querySelector("#loginForm"),
+  loginEmail: document.querySelector("#loginEmail"),
+  loginPassword: document.querySelector("#loginPassword"),
   loginButton: document.querySelector("#loginButton"),
   logoutButton: document.querySelector("#logoutButton"),
   loginStatus: document.querySelector("#loginStatus"),
@@ -68,14 +72,16 @@ const RUNTIME_MODES = ["local", "development", "staging", "production"];
 const MOBILE_VIEWS = ["progress", "tasks", "assign", "flow"];
 
 function hasToken() {
-  return Boolean(state.user?.id);
+  return Boolean(state.token);
 }
 
 function syncAuthUi() {
   const authenticated = hasToken();
   elements.loginScreen.hidden = authenticated;
   elements.appShell.hidden = !authenticated;
-  elements.loginStatus.textContent = authenticated ? "Ready" : "Continue with Supabase SSO";
+  elements.loginStatus.textContent = authenticated
+    ? "Ready"
+    : "Sign in with email/password or use Supabase SSO";
   if (authenticated) {
     elements.sessionTokenValue.textContent = "HttpOnly cookie";
     elements.sessionUserValue.textContent = state.user?.email || state.user?.id || "signed in";
@@ -120,6 +126,7 @@ function setMobileView(view) {
 
 function headers() {
   const output = { "Content-Type": "application/json" };
+  if (state.token) output.Authorization = `Bearer ${state.token}`;
   return output;
 }
 
@@ -1282,12 +1289,43 @@ elements.loginButton.addEventListener("click", () => {
   window.location.assign("/api/admin/oauth/start");
 });
 
+elements.loginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const email = elements.loginEmail.value.trim();
+  const password = elements.loginPassword.value;
+  if (!email || !password) {
+    showToast("Enter email and password", true);
+    return;
+  }
+
+  try {
+    elements.loginStatus.textContent = "Signing in...";
+    const response = await request("/api/admin/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password })
+    });
+    state.token = response.access_token || "";
+    state.user = response.user || null;
+    state.authState = "authenticated";
+    elements.loginPassword.value = "";
+    syncAuthUi();
+    showToast("Signed in");
+    await refreshAll();
+  } catch (error) {
+    elements.loginStatus.textContent = error.message;
+    showToast(error.message, true);
+  }
+});
+
 elements.logoutButton.addEventListener("click", async () => {
   state.user = null;
+  state.token = "";
   state.authState = "logged_out";
   try {
     await fetch("/api/admin/logout", { method: "POST" });
   } finally {
+    elements.loginEmail.value = "";
+    elements.loginPassword.value = "";
     window.location.assign("/admin");
   }
 });
@@ -1297,12 +1335,14 @@ async function restoreSession() {
     const response = await request("/api/admin/session", {
       method: "POST"
     });
+    state.token = response.access_token || "";
     state.user = response.user || null;
     state.authState = "authenticated";
     syncAuthUi();
     await refreshAll();
   } catch {
     state.user = null;
+    state.token = "";
     state.authState = "logged_out";
     syncAuthUi();
   }

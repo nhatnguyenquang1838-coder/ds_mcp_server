@@ -873,6 +873,29 @@ type SupabaseSession = {
   user?: { id?: string; email?: string | null };
 };
 
+async function supabasePasswordLogin(email: string, password: string): Promise<SupabaseSession> {
+  if (!isSupabaseConfigured(config) || !config.supabaseAnonKey) {
+    throw new Error("Supabase auth is not configured");
+  }
+
+  const supabase = getSupabaseClient({
+    ...config,
+    supabaseServiceRoleKey: config.supabaseAnonKey
+  });
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error || !data.session || !data.user) {
+    throw new Error(error?.message || "invalid_login");
+  }
+
+  return {
+    access_token: data.session.access_token,
+    refresh_token: data.session.refresh_token,
+    expires_in: data.session.expires_in,
+    token_type: data.session.token_type,
+    user: { id: data.user.id, email: data.user.email }
+  };
+}
+
 async function supabaseExchangeOAuthCode(code: string, codeVerifier: string): Promise<SupabaseSession> {
   if (!isSupabaseConfigured(config) || !config.supabaseAnonKey) {
     throw new Error("Supabase auth is not configured");
@@ -1124,6 +1147,32 @@ function trackUpstreamCall(req: IncomingMessage, url: URL): void {
     last_seen_at: now,
     last_user_agent: headerValue(req, "user-agent")
   });
+}
+
+function adminSessionCookieHeaders(req: IncomingMessage, sessionToken: string): string[] {
+  const secure = isSecureCookieRequest(req);
+  return [
+    cookieHeader("dw_agentops_admin_session", sessionToken, {
+      httpOnly: true,
+      path: "/",
+      sameSite: "Lax",
+      secure
+    }),
+    cookieHeader("dw_agentops_admin_oauth_state", "", {
+      httpOnly: true,
+      path: "/api/admin/oauth",
+      sameSite: "Lax",
+      secure,
+      maxAge: 0
+    }),
+    cookieHeader("dw_agentops_admin_oauth_verifier", "", {
+      httpOnly: true,
+      path: "/api/admin/oauth",
+      sameSite: "Lax",
+      secure,
+      maxAge: 0
+    })
+  ];
 }
 
 function getUpstreamCallDashboard(limit = 50) {
@@ -2048,21 +2097,9 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
         return true;
       }
 
-      const secure = isSecureCookieRequest(req);
-      const cookieAttrs = [
-        cookieHeader("dw_agentops_admin_session", session.access_token, {
-          httpOnly: true,
-          path: "/",
-          sameSite: "Lax",
-          secure
-        }),
-        cookieHeader("dw_agentops_admin_oauth_state", "", { httpOnly: true, path: "/api/admin/oauth", sameSite: "Lax", secure, maxAge: 0 }),
-        cookieHeader("dw_agentops_admin_oauth_verifier", "", { httpOnly: true, path: "/api/admin/oauth", sameSite: "Lax", secure, maxAge: 0 })
-      ];
-
       res.writeHead(302, {
         Location: "/admin",
-        "Set-Cookie": cookieAttrs,
+        "Set-Cookie": adminSessionCookieHeaders(req, session.access_token),
         "Cache-Control": "no-store",
         "X-Request-Id": requestId(req)
       });
@@ -2102,29 +2139,47 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
   if (req.method === "POST" && url.pathname === "/api/admin/login") {
     setCorsHeaders(req, res);
     try {
-      const body = await readJsonBody(req) as { code?: string; code_verifier?: string };
+      const body = await readJsonBody(req) as { email?: string; password?: string; code?: string; code_verifier?: string };
+      const email = (body.email || "").trim();
+      const password = body.password || "";
       const code = (body.code || "").trim();
       const codeVerifier = (body.code_verifier || "").trim();
-      if (!code || !codeVerifier) {
-        sendJson(res, 400, { error: "code and code_verifier are required" });
-        return true;
+      let session: SupabaseSession;
+      if (email || password) {
+        if (!email || !password) {
+          sendJson(res, 400, { error: "email and password are required" });
+          return true;
+        }
+        session = await supabasePasswordLogin(email, password);
+      } else {
+        if (!code || !codeVerifier) {
+          sendJson(res, 400, { error: "email and password or code and code_verifier are required" });
+          return true;
+        }
+        session = await supabaseExchangeOAuthCode(code, codeVerifier);
       }
 
-      const session = await supabaseExchangeOAuthCode(code, codeVerifier);
       const user = session.user || await supabaseAuthUser(session.access_token);
       if (!user?.id) {
         sendJson(res, 401, { error: "Unauthorized" });
         return true;
       }
 
-      sendJson(res, 200, {
+      const responseBody = {
         ok: true,
         access_token: session.access_token,
         refresh_token: session.refresh_token,
         expires_in: session.expires_in,
         token_type: session.token_type,
         user
+      };
+
+      res.writeHead(200, {
+        "Set-Cookie": adminSessionCookieHeaders(req, session.access_token),
+        "Cache-Control": "no-store",
+        "X-Request-Id": requestId(req)
       });
+      res.end(JSON.stringify(responseBody));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Login failed";
       sendJson(res, 401, { error: message });
@@ -2146,7 +2201,7 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
       return true;
     }
 
-    sendJson(res, 200, { ok: true, user });
+    sendJson(res, 200, { ok: true, access_token: bearer, user });
     return true;
   }
 

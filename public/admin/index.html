@@ -12,10 +12,21 @@
         <p class="eyebrow">DW AgentOps</p>
         <h1>Admin login</h1>
         <p class="login-copy">
-          Continue with Supabase SSO to unlock the admin console.
+          Sign in with email and password, or continue with Supabase SSO.
         </p>
 
         <div class="login-form">
+          <form id="loginForm" class="stack">
+            <label>
+              Email
+              <input id="loginEmail" type="email" placeholder="admin@example.com" autocomplete="email" />
+            </label>
+            <label>
+              Password
+              <input id="loginPassword" type="password" placeholder="Your password" autocomplete="current-password" />
+            </label>
+            <button type="submit">Sign in</button>
+          </form>
           <button id="loginButton" type="button">Continue with SSO</button>
           <button id="logoutButton" type="button" class="secondary">Sign out</button>
         </div>
@@ -23,7 +34,7 @@
         <div class="login-note">
           <strong>Note:</strong> the signed-in session is stored in an HttpOnly cookie for this browser.
         </div>
-        <p id="loginStatus" class="login-status">Sign in with Supabase</p>
+        <p id="loginStatus" class="login-status">Sign in with email/password or use Supabase SSO</p>
         <p class="build-version login-build-version">Build <span id="loginBuildVersion">-</span></p>
       </div>
     </section>
