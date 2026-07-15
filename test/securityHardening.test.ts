@@ -5,6 +5,7 @@ import test from "node:test";
 import { loadConfig, type AppConfig } from "../src/config.js";
 import { authorizeRoute } from "../src/security/auth.js";
 import {
+  buildAdminOAuthRedirectUri,
   buildOAuthMetadataJson,
   buildOAuthProtectedResourceJson,
   isRefreshTokenExpired,
@@ -135,6 +136,30 @@ test("builds oauth metadata from the configured public base url", () => {
   assert.equal(metadata.token_endpoint, "https://example.com/oauth/token");
   assert.equal(metadata.authorization_response_iss_parameter_supported, true);
   assert.equal(metadata.resource_parameter_supported, true);
+});
+
+test("builds the admin oauth redirect uri from the configured public base url", () => {
+  const config = {
+    ...baseConfig(),
+    publicBaseUrl: "https://example.com"
+  };
+
+  assert.equal(
+    buildAdminOAuthRedirectUri(config, "http://localhost:8787"),
+    "https://example.com/api/admin/oauth/callback"
+  );
+});
+
+test("falls back to the request base url for the admin oauth redirect uri", () => {
+  const config = {
+    ...baseConfig(),
+    publicBaseUrl: undefined
+  };
+
+  assert.equal(
+    buildAdminOAuthRedirectUri(config, "http://localhost:8787"),
+    "http://localhost:8787/api/admin/oauth/callback"
+  );
 });
 
 test("builds protected resource metadata for resource-scoped paths", () => {

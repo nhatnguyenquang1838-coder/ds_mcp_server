@@ -191,6 +191,10 @@ export function resolveOAuthIssuer(config: AppConfig, requestBaseUrl: string): s
   return normalizeBaseUrl(config.publicBaseUrl || requestBaseUrl);
 }
 
+export function buildAdminOAuthRedirectUri(config: AppConfig, requestBaseUrl: string): string {
+  return `${resolveOAuthIssuer(config, requestBaseUrl)}/api/admin/oauth/callback`;
+}
+
 export function buildOAuthMetadata(config: AppConfig, requestBaseUrl: string): OAuthMetadata {
   const issuer = resolveOAuthIssuer(config, requestBaseUrl);
   return {

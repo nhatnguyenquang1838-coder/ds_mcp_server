@@ -52,6 +52,7 @@ import { recordSecuritySignal } from "./security/monitoring.js";
 import {
   buildOAuthMetadataJson,
   buildOAuthProtectedResourceJson,
+  buildAdminOAuthRedirectUri,
   createOAuthAuthorizationCode,
   exchangeOAuthAuthorizationCode,
   getOAuthClientRecord,
@@ -977,14 +978,7 @@ async function handleAdminStatic(req: IncomingMessage, res: ServerResponse, url:
 }
 
 function adminOauthRedirectUri(req: IncomingMessage): string {
-  const host = firstHeader(req.headers["x-forwarded-host"]) || req.headers.host || "localhost";
-  const forwardedProto = firstHeader(req.headers["x-forwarded-proto"]);
-  const isLocalhost =
-    host.startsWith("localhost") ||
-    host.startsWith("127.0.0.1") ||
-    host.startsWith("[::1]");
-  const proto = forwardedProto || (isLocalhost ? "http" : "https");
-  return `${proto}://${host}/api/admin/oauth/callback`;
+  return buildAdminOAuthRedirectUri(config, requestBaseUrl(req));
 }
 
 function supabaseOauthAuthorizeUrl(req: IncomingMessage, state: string, codeChallenge: string): string {
