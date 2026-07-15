@@ -129,7 +129,7 @@ export async function authorizeRoute(
   const bearer = bearerFromRequest(req);
 
   if (policy === "rest_bearer") {
-    const principal = await principalFromBearer(config, bearer);
+    const principal = await principalFromBearer(config, bearer) || await principalFromAdminSession(config, req);
     if (principal && ["rest", "oauth", "admin"].includes(principal.type)) {
       return { ok: true, principal };
     }

@@ -106,6 +106,37 @@ test("returns 401 for mismatched bearer tokens and 403 for disabled routes", asy
   }
 });
 
+test("allows admin session cookies to satisfy rest bearer routes", async () => {
+  const config = {
+    ...baseConfig(),
+    supabaseUrl: "https://example.supabase.co",
+    supabaseAnonKey: "anon-key",
+    supabaseServiceRoleKey: "service-role-key",
+    adminAllowedEmails: []
+  };
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => ({
+    ok: true,
+    json: async () => ({ id: "user-123", email: "admin@example.com" })
+  })) as typeof fetch;
+
+  try {
+    const req = mockRequest("", {
+      cookie: "dw_agentops_admin_session=token",
+      host: "ds-mcp-server-one.vercel.app"
+    });
+
+    const decision = await authorizeRoute(config, "rest_bearer", req);
+    assert.equal(decision.ok, true);
+    if (decision.ok) {
+      assert.equal(decision.principal.type, "admin");
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("returns 403 when internal callback token is missing", async () => {
   const config = {
     ...baseConfig(),
