@@ -55,10 +55,19 @@ ChatGPT custom agents should use the OAuth endpoints under `/oauth/*` and call R
 
 Required env vars:
 
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `SUPABASE_OAUTH_PROVIDER` such as `google`, `github`, or your configured provider
-- `SUPABASE_ADMIN_ALLOWED_EMAILS` if you want to whitelist specific admin accounts
+- `DS_MCP_SUPABASE_URL`
+- `DS_MCP_SUPABASE_ANON_KEY`
+- `DS_MCP_SUPABASE_OAUTH_PROVIDER` such as `google`, `github`, or another enabled provider
+- `DS_MCP_SUPABASE_OAUTH_SCOPES` when provider-specific scopes differ from the defaults
+- `DS_MCP_SUPABASE_ADMIN_ALLOWED_EMAILS` when access must be restricted to specific admin accounts
+
+Admin OAuth readiness is validated independently from MCP OAuth and Supabase service-role readiness. In strict production mode, startup fails when the Supabase URL, anon key, or OAuth provider is missing or empty. Diagnostics expose readiness booleans and configuration names only; they do not return secret values or allowlisted email addresses.
+
+Production configuration must also enable the selected provider in Supabase and allow the deployed callback URL:
+
+```text
+https://ds-mcp-server-one.vercel.app/api/admin/oauth/callback
+```
 
 For local development, make sure your Supabase OAuth app allows the callback URL that the server builds from the current host, for example:
 
