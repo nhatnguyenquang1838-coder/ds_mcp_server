@@ -204,6 +204,97 @@ test("allows strict startup without webhook secret or cors allowlist when core a
   assert.equal(startup.ok, true);
 });
 
+test("rejects production Admin OAuth when the anon key is missing", () => {
+  const config = {
+    ...baseConfig(),
+    runtimeMode: "production" as const,
+    securityEnforcement: "strict" as const,
+    supabaseUrl: "https://example.supabase.co",
+    supabaseServiceRoleKey: "service-role-key",
+    supabaseAnonKey: undefined,
+    supabaseOauthProvider: "google"
+  };
+
+  const startup = validateSecurityStartup(config);
+  assert.equal(startup.ok, false);
+  assert.equal(startup.summary.mcpOAuthConfigured, true);
+  assert.equal(startup.summary.adminOAuthConfigured, false);
+  assert.equal(
+    startup.issues.includes("DS_MCP_SUPABASE_ANON_KEY is required for Admin OAuth"),
+    true
+  );
+});
+
+test("rejects production Admin OAuth when the provider is empty", () => {
+  const config = {
+    ...baseConfig(),
+    runtimeMode: "production" as const,
+    securityEnforcement: "strict" as const,
+    supabaseUrl: "https://example.supabase.co",
+    supabaseServiceRoleKey: "service-role-key",
+    supabaseAnonKey: "anon-key",
+    supabaseOauthProvider: "   "
+  };
+
+  const startup = validateSecurityStartup(config);
+  assert.equal(startup.ok, false);
+  assert.equal(startup.summary.adminOAuthConfigured, false);
+  assert.equal(
+    startup.issues.includes("DS_MCP_SUPABASE_OAUTH_PROVIDER is required for Admin OAuth"),
+    true
+  );
+});
+
+test("accepts valid production Admin OAuth independently from service-role readiness", () => {
+  const config = {
+    ...baseConfig(),
+    runtimeMode: "production" as const,
+    securityEnforcement: "strict" as const,
+    supabaseUrl: "https://example.supabase.co",
+    supabaseServiceRoleKey: "service-role-key",
+    supabaseAnonKey: "anon-key",
+    supabaseOauthProvider: "google"
+  };
+
+  const startup = validateSecurityStartup(config);
+  assert.equal(startup.ok, true);
+  assert.equal(startup.summary.adminOAuthConfigured, true);
+  assert.equal(startup.summary.mcpOAuthConfigured, true);
+  assert.equal(startup.summary.supabaseConfigured, true);
+  assert.equal(JSON.stringify(startup.summary).includes("anon-key"), false);
+  assert.equal(JSON.stringify(startup.summary).includes("service-role-key"), false);
+});
+
+test("reports Admin OAuth allowlist state without exposing email values", () => {
+  const config = {
+    ...baseConfig(),
+    supabaseUrl: "https://example.supabase.co",
+    supabaseAnonKey: "anon-key",
+    supabaseOauthProvider: "google",
+    adminAllowedEmails: ["admin@example.com"]
+  };
+
+  const posture = buildSecurityPosture(config);
+  const allowlist = posture.controls.find((control) => control.name === "Admin email allowlist");
+  assert.equal(allowlist?.configured, true);
+  assert.equal(JSON.stringify(posture).includes("admin@example.com"), false);
+});
+
+test("keeps MCP OAuth and service-role readiness compatible when Admin OAuth is absent", () => {
+  const config = {
+    ...baseConfig(),
+    supabaseUrl: "https://example.supabase.co",
+    supabaseServiceRoleKey: "service-role-key",
+    supabaseAnonKey: undefined,
+    supabaseOauthProvider: "google"
+  };
+
+  const startup = validateSecurityStartup(config);
+  assert.equal(startup.summary.mcpOAuthConfigured, true);
+  assert.equal(startup.summary.supabaseConfigured, true);
+  assert.equal(startup.summary.adminOAuthConfigured, false);
+});
+
 test("rejects request bodies that exceed the configured limit", async () => {
   await assert.rejects(
     () => readRawBody(mockRequest("abcdef"), 3),
