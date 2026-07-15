@@ -180,7 +180,13 @@ export function resolveRoutePolicy(method: string, pathname: string): ResolvedRo
     return { routeId: "dev.environment", policy: "admin_token", sensitive: true };
   }
 
-  if (pathname === "/api/admin/login" || pathname === "/api/admin/session") {
+  if (
+    pathname === "/api/admin/login" ||
+    pathname === "/api/admin/session" ||
+    pathname === "/api/admin/logout" ||
+    pathname === "/api/admin/oauth/start" ||
+    pathname === "/api/admin/oauth/callback"
+  ) {
     return { routeId: "admin.auth", policy: "public", sensitive: false };
   }
 

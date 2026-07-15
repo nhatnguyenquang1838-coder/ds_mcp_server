@@ -36,6 +36,19 @@ function bearerFromRequest(req: IncomingMessage): string | undefined {
   return authorization.slice("Bearer ".length).trim();
 }
 
+function cookieValue(req: IncomingMessage, name: string): string | undefined {
+  const raw = headerValue(req, "cookie");
+  if (!raw) return undefined;
+  for (const part of raw.split(/;\s*/)) {
+    const index = part.indexOf("=");
+    if (index <= 0) continue;
+    const key = part.slice(0, index).trim();
+    if (key !== name) continue;
+    return decodeURIComponent(part.slice(index + 1));
+  }
+  return undefined;
+}
+
 function adminEmailAllowed(config: AppConfig, email: string | undefined): boolean {
   if (!email) return false;
   if (config.adminAllowedEmails.length === 0) return true;
@@ -80,6 +93,13 @@ async function principalFromBearer(config: AppConfig, bearer: string | undefined
   return undefined;
 }
 
+async function principalFromAdminSession(config: AppConfig, req: IncomingMessage): Promise<Principal | undefined> {
+  const token = cookieValue(req, "dw_agentops_admin_session");
+  if (!token) return undefined;
+  const principal = await verifySupabaseAdminToken(config, token);
+  return principal?.type === "admin" ? principal : undefined;
+}
+
 function webhookSignatureMatches(secret: string, req: IncomingMessage): boolean {
   const signatureHeader = headerValue(req, "x-hub-signature-256");
   const signature = signatureHeader?.trim();
@@ -120,7 +140,7 @@ export async function authorizeRoute(
   }
 
   if (policy === "admin_token") {
-    const principal = await principalFromBearer(config, bearer);
+    const principal = await principalFromBearer(config, bearer) || await principalFromAdminSession(config, req);
     if (principal && principal.type === "admin") {
       return { ok: true, principal };
     }

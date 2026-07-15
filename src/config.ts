@@ -94,6 +94,8 @@ export type AppConfig = {
   supabaseUrl?: string;
   supabaseServiceRoleKey?: string;
   supabaseAnonKey?: string;
+  supabaseOauthProvider: string;
+  supabaseOauthScopes: string[];
   adminAllowedEmails: string[];
   runtimeMode: RuntimeMode;
   securityEnforcement: SecurityEnforcement;
@@ -267,6 +269,8 @@ export function loadConfig(): AppConfig {
     supabaseUrl: activeProfile.supabaseUrl,
     supabaseServiceRoleKey: activeProfile.supabaseServiceRoleKey,
     supabaseAnonKey: appEnv("SUPABASE_ANON_KEY") || undefined,
+    supabaseOauthProvider: appEnv("SUPABASE_OAUTH_PROVIDER") || "google",
+    supabaseOauthScopes: readCsv(appEnv("SUPABASE_OAUTH_SCOPES"), ["openid", "email", "profile"]),
     adminAllowedEmails: readCsv(appEnv("SUPABASE_ADMIN_ALLOWED_EMAILS")),
     runtimeMode: readRuntimeMode(appEnv("APP_RUNTIME_MODE")),
     securityEnforcement,

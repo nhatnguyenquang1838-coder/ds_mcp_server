@@ -70,7 +70,7 @@ export async function validateSecurityRuntimeDependencies(config: AppConfig): Pr
   ok: boolean;
   issues: string[];
 }> {
-  if (config.securityEnforcement !== "strict" || !isSupabaseConfigured(config)) {
+  if (config.runtimeMode === "local" || config.securityEnforcement !== "strict" || !isSupabaseConfigured(config)) {
     return { ok: true, issues: [] };
   }
 

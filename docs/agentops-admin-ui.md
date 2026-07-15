@@ -45,15 +45,26 @@ GET    /api/tasks/{task_id}/events
 
 ## Configuration
 
-Admin users sign in with Supabase credentials through `/api/admin/login`, which returns a Supabase access token stored locally in the browser.
+Admin users sign in through `/api/admin/oauth/start`, which redirects them to the configured Supabase OAuth provider and returns to `/api/admin/oauth/callback`.
 
-The same session token is then sent to the admin and workflow endpoints as:
-
-```text
-Authorization: Bearer <supabase_access_token>
-```
+The callback stores the Supabase session in an HttpOnly cookie and the browser reuses that session for admin and workflow requests.
 
 ChatGPT custom agents should use the OAuth endpoints under `/oauth/*` and call REST endpoints with the OAuth access token.
+
+## Admin SSO configuration
+
+Required env vars:
+
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+- `SUPABASE_OAUTH_PROVIDER` such as `google`, `github`, or your configured provider
+- `SUPABASE_ADMIN_ALLOWED_EMAILS` if you want to whitelist specific admin accounts
+
+For local development, make sure your Supabase OAuth app allows the callback URL that the server builds from the current host, for example:
+
+```text
+http://localhost:8787/api/admin/oauth/callback
+```
 
 ## Notes
 

@@ -175,6 +175,10 @@ h3 {
   padding-inline: 2px;
 }
 
+.login-build-version {
+  margin-top: 4px;
+}
+
 #appShell {
   min-height: 100vh;
 }
@@ -224,6 +228,17 @@ h3 {
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
+}
+
+.build-version {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.build-version span {
+  color: var(--strong);
+  font-weight: 700;
 }
 
 .stack {

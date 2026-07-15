@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFile } from "node:fs/promises";
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { ZodError } from "zod";
@@ -77,7 +77,7 @@ import {
 
 const config = loadConfig();
 const securityStartup = validateSecurityStartup(config);
-const serviceVersion = "0.7.0";
+const serviceVersion = `0.1.0.${Math.floor(Date.now() / 1000)}`;
 const publicRoot = resolve(process.cwd(), "public");
 
 if (!securityStartup.ok) {
@@ -192,6 +192,29 @@ function inlineStyleContentSecurityPolicy(allowHttpsFormAction = false): string 
 
 function firstHeader(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
+}
+
+function parseCookies(header: string | undefined): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  if (!header) return cookies;
+  for (const part of header.split(/;\s*/)) {
+    const index = part.indexOf("=");
+    if (index <= 0) continue;
+    const key = part.slice(0, index).trim();
+    const value = part.slice(index + 1).trim();
+    if (key) cookies[key] = decodeURIComponent(value);
+  }
+  return cookies;
+}
+
+function cookieHeader(name: string, value: string, options: { httpOnly?: boolean; path?: string; maxAge?: number; sameSite?: "Lax" | "Strict" | "None"; secure?: boolean } = {}): string {
+  const parts = [`${name}=${encodeURIComponent(value)}`];
+  parts.push(`Path=${options.path || "/"}`);
+  if (options.maxAge !== undefined) parts.push(`Max-Age=${Math.floor(options.maxAge)}`);
+  if (options.httpOnly) parts.push("HttpOnly");
+  if (options.sameSite) parts.push(`SameSite=${options.sameSite}`);
+  if (options.secure) parts.push("Secure");
+  return parts.join("; ");
 }
 
 function hashForComparison(value: string): Buffer {
@@ -724,7 +747,23 @@ function clientKey(req: IncomingMessage): string {
 }
 
 function isAllowedOrigin(origin: string): boolean {
-  return config.securityEnforcement !== "strict" || config.corsAllowedOrigins.includes(origin);
+  if (config.securityEnforcement !== "strict") return true;
+  if (config.runtimeMode !== "production") {
+    try {
+      const parsed = new URL(origin);
+      const isLoopback =
+        parsed.hostname === "localhost" ||
+        parsed.hostname === "127.0.0.1" ||
+        parsed.hostname === "::1";
+
+      if (isLoopback && (parsed.protocol === "http:" || parsed.protocol === "https:")) {
+        return true;
+      }
+    } catch {
+      // Fall through to the configured allowlist.
+    }
+  }
+  return config.corsAllowedOrigins.includes(origin);
 }
 
 function setCorsHeaders(reqOrRes: IncomingMessage | ServerResponse, maybeRes?: ServerResponse): void {
@@ -823,33 +862,64 @@ async function supabaseAuthUser(accessToken: string): Promise<{ id?: string; ema
   return { id: data.user.id, email: data.user.email };
 }
 
-async function supabasePasswordLogin(email: string, password: string): Promise<{
+type SupabaseSession = {
   access_token: string;
   refresh_token: string;
   expires_in: number;
   token_type: string;
   user?: { id?: string; email?: string | null };
-}> {
+};
+
+async function supabaseExchangeOAuthCode(code: string, codeVerifier: string): Promise<SupabaseSession> {
   if (!isSupabaseConfigured(config) || !config.supabaseAnonKey) {
     throw new Error("Supabase auth is not configured");
   }
 
-  const supabase = getSupabaseClient({
-    ...config,
-    supabaseServiceRoleKey: config.supabaseAnonKey
+  const response = await fetch(`${config.supabaseUrl!.replace(/\/+$/, "")}/auth/v1/token?grant_type=pkce`, {
+    method: "POST",
+    headers: {
+      apikey: config.supabaseAnonKey,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ auth_code: code, code_verifier: codeVerifier })
   });
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error || !data.session || !data.user) {
-    throw new Error(error?.message || "invalid_login");
+
+  const body = await response.json().catch(() => ({} as Record<string, unknown>));
+  if (!response.ok) {
+    throw new Error(typeof body.error_description === "string" ? body.error_description : "invalid_login");
+  }
+
+  const accessToken = typeof body.access_token === "string" ? body.access_token : "";
+  const refreshToken = typeof body.refresh_token === "string" ? body.refresh_token : "";
+  const expiresIn = typeof body.expires_in === "number" ? body.expires_in : 3600;
+  const tokenType = typeof body.token_type === "string" ? body.token_type : "bearer";
+  const user = body.user && typeof body.user === "object"
+    ? { id: (body.user as { id?: string }).id, email: (body.user as { email?: string | null }).email }
+    : undefined;
+
+  if (!accessToken || !refreshToken || !user?.id) {
+    throw new Error("invalid_login");
   }
 
   return {
-    access_token: data.session.access_token,
-    refresh_token: data.session.refresh_token,
-    expires_in: data.session.expires_in,
-    token_type: data.session.token_type,
-    user: { id: data.user.id, email: data.user.email }
+    access_token: accessToken,
+    refresh_token: refreshToken,
+    expires_in: expiresIn,
+    token_type: tokenType,
+    user
   };
+}
+
+function adminSessionTokenFromRequest(req: IncomingMessage): string | undefined {
+  const bearer = firstHeader(req.headers.authorization);
+  if (bearer?.startsWith("Bearer ")) return bearer.slice("Bearer ".length).trim();
+  const cookies = parseCookies(firstHeader(req.headers.cookie));
+  return cookies.dw_agentops_admin_session;
+}
+
+function isSecureCookieRequest(req: IncomingMessage): boolean {
+  const proto = firstHeader(req.headers["x-forwarded-proto"]) || "https";
+  return proto === "https";
 }
 
 async function handleAdminStatic(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
@@ -906,6 +976,38 @@ async function handleAdminStatic(req: IncomingMessage, res: ServerResponse, url:
   }
 }
 
+function adminOauthRedirectUri(req: IncomingMessage): string {
+  const host = firstHeader(req.headers["x-forwarded-host"]) || req.headers.host || "localhost";
+  const forwardedProto = firstHeader(req.headers["x-forwarded-proto"]);
+  const isLocalhost =
+    host.startsWith("localhost") ||
+    host.startsWith("127.0.0.1") ||
+    host.startsWith("[::1]");
+  const proto = forwardedProto || (isLocalhost ? "http" : "https");
+  return `${proto}://${host}/api/admin/oauth/callback`;
+}
+
+function supabaseOauthAuthorizeUrl(req: IncomingMessage, state: string, codeChallenge: string): string {
+  if (!config.supabaseUrl || !config.supabaseAnonKey) {
+    throw new Error("Supabase auth is not configured");
+  }
+  const base = `${config.supabaseUrl.replace(/\/+$/, "")}/auth/v1/authorize`;
+  const url = new URL(base);
+  url.searchParams.set("provider", config.supabaseOauthProvider);
+  url.searchParams.set("redirect_to", adminOauthRedirectUri(req));
+  url.searchParams.set("code_challenge", codeChallenge);
+  url.searchParams.set("code_challenge_method", "s256");
+  url.searchParams.set("state", state);
+  if (config.supabaseOauthScopes.length > 0) {
+    url.searchParams.set("scopes", config.supabaseOauthScopes.join(" "));
+  }
+  return url.toString();
+}
+
+function logAdminOauthDebug(event: string, data: Record<string, unknown>): void {
+  console.log(`[admin-oauth] ${event}`, data);
+}
+
 function sendBinary(
   res: ServerResponse,
   statusCode: number,
@@ -947,8 +1049,13 @@ function repoInput(match: RegExpMatchArray): { owner: string; repo: string } {
 function requestBaseUrl(req: IncomingMessage): string {
   if (config.publicBaseUrl) return config.publicBaseUrl.replace(/\/$/, "");
 
-  const proto = firstHeader(req.headers["x-forwarded-proto"]) || "https";
   const host = firstHeader(req.headers["x-forwarded-host"]) || req.headers.host || "localhost";
+  const forwardedProto = firstHeader(req.headers["x-forwarded-proto"]);
+  const isLocalhost =
+    host.startsWith("localhost") ||
+    host.startsWith("127.0.0.1") ||
+    host.startsWith("[::1]");
+  const proto = forwardedProto || (isLocalhost ? "http" : "https");
   return `${proto}://${host}`.replace(/\/$/, "");
 }
 
@@ -1841,18 +1948,156 @@ async function handleSecurityApi(req: IncomingMessage, res: ServerResponse, url:
 }
 
 async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<boolean> {
-  if (req.method === "POST" && url.pathname === "/api/admin/login") {
+  if (req.method === "GET" && url.pathname === "/api/admin/oauth/start") {
+    setCorsHeaders(req, res);
+    if (!isSupabaseConfigured(config) || !config.supabaseAnonKey) {
+      logAdminOauthDebug("start.misconfigured", {
+        supabaseUrlConfigured: Boolean(config.supabaseUrl),
+        supabaseAnonKeyConfigured: Boolean(config.supabaseAnonKey),
+        publicBaseUrl: config.publicBaseUrl,
+        runtimeMode: config.runtimeMode
+      });
+      sendJson(res, 400, { error: "Supabase auth is not configured" });
+      return true;
+    }
+
+    const state = randomUUID();
+    const codeVerifier = randomBytes(32).toString("base64url");
+    const codeChallenge = createHash("sha256").update(codeVerifier, "utf8").digest("base64url");
+    const redirect = supabaseOauthAuthorizeUrl(req, state, codeChallenge);
+    const secure = isSecureCookieRequest(req);
+    logAdminOauthDebug("start", {
+      requestId: requestId(req),
+      host: firstHeader(req.headers.host),
+      forwardedHost: firstHeader(req.headers["x-forwarded-host"]),
+      forwardedProto: firstHeader(req.headers["x-forwarded-proto"]),
+      redirectTo: adminOauthRedirectUri(req),
+      redirect,
+      state,
+      codeChallengePrefix: codeChallenge.slice(0, 8),
+      secureCookie: secure
+    });
+    const cookieAttrs = [
+      cookieHeader("dw_agentops_admin_oauth_state", state, { httpOnly: true, path: "/api/admin/oauth", sameSite: "Lax", secure }),
+      cookieHeader("dw_agentops_admin_oauth_verifier", codeVerifier, { httpOnly: true, path: "/api/admin/oauth", sameSite: "Lax", secure })
+    ];
+    res.writeHead(302, {
+      Location: redirect,
+      "Set-Cookie": cookieAttrs,
+      "Cache-Control": "no-store",
+      "X-Request-Id": requestId(req)
+    });
+    res.end();
+    return true;
+  }
+
+  if (req.method === "GET" && url.pathname === "/api/admin/oauth/callback") {
     setCorsHeaders(req, res);
     try {
-      const body = await readJsonBody(req) as { email?: string; password?: string };
-      const email = (body.email || "").trim();
-      const password = (body.password || "").trim();
-      if (!email || !password) {
-        sendJson(res, 400, { error: "email and password are required" });
+      const cookies = parseCookies(firstHeader(req.headers.cookie));
+      const expectedState = cookies.dw_agentops_admin_oauth_state;
+      const codeVerifier = cookies.dw_agentops_admin_oauth_verifier;
+      const stateParam = url.searchParams.get("state") || "";
+      const code = url.searchParams.get("code") || "";
+      logAdminOauthDebug("callback", {
+        requestId: requestId(req),
+        host: firstHeader(req.headers.host),
+        referer: firstHeader(req.headers.referer),
+        cookieNames: Object.keys(cookies),
+        expectedStatePresent: Boolean(expectedState),
+        codeVerifierPresent: Boolean(codeVerifier),
+        stateParamPresent: Boolean(stateParam),
+        stateMatch: Boolean(expectedState && stateParam && stateParam === expectedState),
+        codePresent: Boolean(code),
+        callbackUrl: url.toString()
+      });
+      if (!expectedState || !codeVerifier || !stateParam || stateParam !== expectedState) {
+        logAdminOauthDebug("callback.state_mismatch", {
+          requestId: requestId(req),
+          expectedStatePresent: Boolean(expectedState),
+          codeVerifierPresent: Boolean(codeVerifier),
+          stateParam,
+          cookieHeaderPresent: Boolean(firstHeader(req.headers.cookie))
+        });
+        sendHtml(res, 400, "<h1>OAuth login failed</h1><p>Invalid or missing state.</p>");
         return true;
       }
 
-      const session = await supabasePasswordLogin(email, password);
+      const session = await supabaseExchangeOAuthCode(code, codeVerifier);
+      const user = session.user || await supabaseAuthUser(session.access_token);
+      if (!user?.id) {
+        logAdminOauthDebug("callback.no_user", {
+          requestId: requestId(req),
+          userPresent: Boolean(user),
+          sessionTokenPrefix: session.access_token.slice(0, 8)
+        });
+        sendHtml(res, 401, "<h1>OAuth login failed</h1><p>Could not resolve Supabase user.</p>");
+        return true;
+      }
+
+      const secure = isSecureCookieRequest(req);
+      const cookieAttrs = [
+        cookieHeader("dw_agentops_admin_session", session.access_token, {
+          httpOnly: true,
+          path: "/",
+          sameSite: "Lax",
+          secure
+        }),
+        cookieHeader("dw_agentops_admin_oauth_state", "", { httpOnly: true, path: "/api/admin/oauth", sameSite: "Lax", secure, maxAge: 0 }),
+        cookieHeader("dw_agentops_admin_oauth_verifier", "", { httpOnly: true, path: "/api/admin/oauth", sameSite: "Lax", secure, maxAge: 0 })
+      ];
+
+      res.writeHead(302, {
+        Location: "/admin",
+        "Set-Cookie": cookieAttrs,
+        "Cache-Control": "no-store",
+        "X-Request-Id": requestId(req)
+      });
+      logAdminOauthDebug("callback.success", {
+        requestId: requestId(req),
+        userId: user.id,
+        userEmail: user.email || undefined
+      });
+      res.end();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "OAuth login failed";
+      logAdminOauthDebug("callback.error", {
+        requestId: requestId(req),
+        message
+      });
+      sendHtml(res, 401, `<h1>OAuth login failed</h1><p>${escapeHtml(message)}</p>`);
+    }
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/admin/logout") {
+    setCorsHeaders(req, res);
+    const secure = isSecureCookieRequest(req);
+    res.writeHead(200, {
+      "Set-Cookie": [
+        cookieHeader("dw_agentops_admin_session", "", { httpOnly: true, path: "/", sameSite: "Lax", secure, maxAge: 0 }),
+        cookieHeader("dw_agentops_admin_oauth_state", "", { httpOnly: true, path: "/api/admin/oauth", sameSite: "Lax", secure, maxAge: 0 }),
+        cookieHeader("dw_agentops_admin_oauth_verifier", "", { httpOnly: true, path: "/api/admin/oauth", sameSite: "Lax", secure, maxAge: 0 })
+      ],
+      "Cache-Control": "no-store",
+      "X-Request-Id": requestId(req)
+    });
+    res.end(JSON.stringify({ ok: true }));
+    return true;
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/admin/login") {
+    setCorsHeaders(req, res);
+    try {
+      const body = await readJsonBody(req) as { code?: string; code_verifier?: string };
+      const code = (body.code || "").trim();
+      const codeVerifier = (body.code_verifier || "").trim();
+      if (!code || !codeVerifier) {
+        sendJson(res, 400, { error: "code and code_verifier are required" });
+        return true;
+      }
+
+      const session = await supabaseExchangeOAuthCode(code, codeVerifier);
       const user = session.user || await supabaseAuthUser(session.access_token);
       if (!user?.id) {
         sendJson(res, 401, { error: "Unauthorized" });
@@ -1876,9 +2121,7 @@ async function handleRestApi(req: IncomingMessage, res: ServerResponse, url: URL
 
   if (req.method === "POST" && url.pathname === "/api/admin/session") {
     setCorsHeaders(req, res);
-    const bearer = (req.headers.authorization || "").startsWith("Bearer ")
-      ? String(req.headers.authorization).slice("Bearer ".length).trim()
-      : "";
+    const bearer = adminSessionTokenFromRequest(req) || "";
     if (!bearer) {
       sendJson(res, 401, { error: "Unauthorized" });
       return true;

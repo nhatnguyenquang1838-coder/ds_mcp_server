@@ -12,25 +12,19 @@
         <p class="eyebrow">DW AgentOps</p>
         <h1>Admin login</h1>
         <p class="login-copy">
-          Sign in with your Supabase account to unlock the admin console.
+          Continue with Supabase SSO to unlock the admin console.
         </p>
 
-        <form id="loginForm" class="login-form">
-          <label>
-            Email
-            <input id="loginEmail" type="email" placeholder="admin@example.com" autocomplete="email" />
-          </label>
-          <label>
-            Password
-            <input id="loginPassword" type="password" placeholder="Your password" autocomplete="current-password" />
-          </label>
-          <button type="submit">Sign in</button>
-        </form>
+        <div class="login-form">
+          <button id="loginButton" type="button">Continue with SSO</button>
+          <button id="logoutButton" type="button" class="secondary">Sign out</button>
+        </div>
 
         <div class="login-note">
-          <strong>Note:</strong> the signed-in session is stored locally in this browser only.
+          <strong>Note:</strong> the signed-in session is stored in an HttpOnly cookie for this browser.
         </div>
         <p id="loginStatus" class="login-status">Sign in with Supabase</p>
+        <p class="build-version login-build-version">Build <span id="loginBuildVersion">-</span></p>
       </div>
     </section>
 
@@ -39,6 +33,7 @@
       <div>
         <p class="eyebrow">DW AgentOps</p>
         <h1>Tasks Control</h1>
+        <p class="build-version">Build <span id="buildVersion">-</span></p>
       </div>
       <div class="topbar-actions">
         <button id="configButton" type="button" class="secondary icon-button" aria-label="Open config">⚙</button>

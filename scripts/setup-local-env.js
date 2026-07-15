@@ -90,6 +90,13 @@ const supabaseServiceRoleKey = pick(
   existing.SUPABASE_SERVICE_ROLE_KEY
 );
 
+const supabaseAnonKey = pick(
+  process.env.DS_MCP_SUPABASE_ANON_KEY,
+  process.env.SUPABASE_ANON_KEY,
+  existing.DS_MCP_SUPABASE_ANON_KEY,
+  existing.SUPABASE_ANON_KEY
+);
+
 if (!supabaseUrl || !supabaseServiceRoleKey) {
   console.error("Missing Supabase credentials. Set DS_MCP_SUPABASE_URL and DS_MCP_SUPABASE_SERVICE_ROLE_KEY first.");
   process.exit(1);
@@ -109,6 +116,7 @@ const values = {
   DS_MCP_RATE_LIMIT_WINDOW_MS: pickEnv(existing, "RATE_LIMIT_WINDOW_MS", "60000"),
   DS_MCP_RATE_LIMIT_MAX_REQUESTS: pickEnv(existing, "RATE_LIMIT_MAX_REQUESTS", "120"),
   DS_MCP_SUPABASE_URL: supabaseUrl,
+  DS_MCP_SUPABASE_ANON_KEY: supabaseAnonKey || "<your-anon-key>",
   DS_MCP_SUPABASE_SERVICE_ROLE_KEY: supabaseServiceRoleKey,
   DS_MCP_SUPABASE_REAL_URL: supabaseUrl,
   DS_MCP_SUPABASE_REAL_SERVICE_ROLE_KEY: supabaseServiceRoleKey,

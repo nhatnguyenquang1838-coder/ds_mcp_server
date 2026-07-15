@@ -33,3 +33,4 @@ Authorization: Bearer <oauth_access_token>
 - The admin UI uses Supabase Auth for human operators.
 - ChatGPT custom agents should use OAuth tokens, not the admin session token.
 - Supabase service-role credentials stay server-side only.
+- For Supabase SSO in the admin UI, set `SUPABASE_OAUTH_PROVIDER` to the provider you enabled in Supabase and make sure the redirect URL includes `/api/admin/oauth/callback`.
