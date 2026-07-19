@@ -81,6 +81,10 @@ export type GitHubMergePullRequestInput = GitHubRepoRef & {
   merge_method?: "merge" | "squash" | "rebase";
 };
 
+export type GitHubMarkPullRequestReadyInput = GitHubRepoRef & {
+  pr_number: number;
+};
+
 export type GitHubClosePullRequestInput = GitHubRepoRef & {
   pr_number: number;
 };
@@ -930,6 +934,30 @@ export async function githubMergePullRequest(config: AppConfig, input: GitHubMer
     repo: input.repo,
     pr_number: input.pr_number,
     ...merge
+  };
+}
+
+export async function githubMarkPullRequestReadyForReview(
+  config: AppConfig,
+  input: GitHubMarkPullRequestReadyInput
+) {
+  assertAllowedRepo(config, input.owner, input.repo);
+
+  await githubFetchNoContent(
+    config,
+    `/repos/${input.owner}/${input.repo}/pulls/${input.pr_number}/ready_for_review`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    }
+  );
+
+  return {
+    ok: true,
+    owner: input.owner,
+    repo: input.repo,
+    pr_number: input.pr_number,
+    ready_for_review: true
   };
 }
 
