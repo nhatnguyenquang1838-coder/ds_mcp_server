@@ -5,11 +5,11 @@ import test from "node:test";
 const clientSource = readFileSync(new URL("../src/tools/githubClient.ts", import.meta.url), "utf8");
 const mcpSource = readFileSync(new URL("../src/mcp.ts", import.meta.url), "utf8");
 
-test("GitHub mark PR ready client calls the review endpoint", () => {
+test("GitHub mark PR ready client calls the GraphQL mutation", () => {
   assert.match(clientSource, /githubMarkPullRequestReadyForReview/);
-  assert.match(clientSource, /ready_for_review/);
-  assert.match(clientSource, /method:\s*"POST"/);
-  assert.match(clientSource, /ready_for_review:\s*true/);
+  assert.match(clientSource, /markPullRequestReadyForReview/);
+  assert.match(clientSource, /pullRequestId/);
+  assert.match(clientSource, /ready_for_review:\s*!/);
 });
 
 test("GitHub mark PR ready MCP tool is exposed as a write action", () => {
