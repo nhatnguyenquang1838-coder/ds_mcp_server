@@ -785,7 +785,18 @@ function isAllowedOrigin(origin: string): boolean {
       // Fall through to the configured allowlist.
     }
   }
-  return config.corsAllowedOrigins.includes(origin);
+  // The deployed backend may call its own REST API with its canonical public
+  // origin. Treat that configured origin as trusted in addition to the
+  // explicit browser allowlist, while continuing to reject unrelated origins.
+  let publicOrigin: string | undefined;
+  if (config.publicBaseUrl) {
+    try {
+      publicOrigin = new URL(config.publicBaseUrl).origin;
+    } catch {
+      publicOrigin = undefined;
+    }
+  }
+  return config.corsAllowedOrigins.includes(origin) || publicOrigin === origin;
 }
 
 function setCorsHeaders(reqOrRes: IncomingMessage | ServerResponse, maybeRes?: ServerResponse): void {

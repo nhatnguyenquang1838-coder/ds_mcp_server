@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import test from "node:test";
 
-import { loadConfig, type AppConfig } from "../src/config.js";
+import { DEFAULT_CORS_ALLOWED_ORIGINS, loadConfig, type AppConfig } from "../src/config.js";
 import { authorizeRoute } from "../src/security/auth.js";
 import { resolveRoutePolicy } from "../src/security/routePolicy.js";
 
@@ -73,6 +73,24 @@ test("allows request without Origin header (server-to-server)", async () => {
   // No origin header provided
   const req = mockRequest("", { 
     authorization: "Bearer rest-token" 
+  });
+
+  const decision = await authorizeRoute(config, "rest_bearer", req);
+  assert.equal(decision.ok, true);
+});
+
+test("provides the trusted ChatGPT origins when the allowlist is not configured", () => {
+  assert.deepEqual(DEFAULT_CORS_ALLOWED_ORIGINS, ["https://chatgpt.com", "https://chat.openai.com"]);
+});
+
+test("accepts the configured public deployment origin", async () => {
+  const config = {
+    ...baseConfig(),
+    publicBaseUrl: "https://ds-mcp-server-one.vercel.app"
+  };
+  const req = mockRequest("", {
+    origin: "https://ds-mcp-server-one.vercel.app",
+    authorization: "Bearer rest-token"
   });
 
   const decision = await authorizeRoute(config, "rest_bearer", req);

@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 export type RuntimeMode = "local" | "development" | "staging" | "production";
 export type SecurityEnforcement = "relaxed" | "strict";
 
+export const DEFAULT_CORS_ALLOWED_ORIGINS = ["https://chatgpt.com", "https://chat.openai.com"];
+
 function parseEnvFile(contents: string): Record<string, string> {
   const output: Record<string, string> = {};
 
@@ -169,7 +171,7 @@ function readSecurityEnforcement(value: string | undefined): SecurityEnforcement
 }
 
 function readOrigins(value: string | undefined): string[] {
-  if (!value) return [];
+  if (!value) return DEFAULT_CORS_ALLOWED_ORIGINS;
 
   const raw = value
     .split(",")
