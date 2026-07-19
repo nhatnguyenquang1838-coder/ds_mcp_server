@@ -371,7 +371,7 @@ export function createMcpServer(config: AppConfig): McpServer {
         owner: input.owner,
         repo: input.repo,
         pr_number: input.pr_number,
-        status: output.merged ? "success" : "failed"
+        status: output.merged ? "success" : "failure"
       });
       return textOutput(output);
     }
