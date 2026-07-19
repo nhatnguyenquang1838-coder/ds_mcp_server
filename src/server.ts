@@ -1431,6 +1431,9 @@ async function enforceSecurity(
   const securityRoute = resolveRoutePolicy(method, url.pathname);
 
   if (securityRoute.sensitive && origin && config.securityEnforcement === "strict" && !isAllowedOrigin(origin)) {
+    console.warn(
+      `[security] origin_not_allowed: rejected=${origin} allowed=[${config.corsAllowedOrigins.join(", ")}] route=${securityRoute.routeId}`
+    );
     logSecurityDenial({
       requestId: requestIdValue,
       routeId: securityRoute.routeId,

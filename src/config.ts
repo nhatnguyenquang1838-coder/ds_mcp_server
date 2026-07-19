@@ -155,7 +155,7 @@ function readSecurityEnforcement(value: string | undefined): SecurityEnforcement
 function readOrigins(value: string | undefined): string[] {
   if (!value) return [];
 
-  return value
+  const raw = value
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean)
@@ -166,6 +166,15 @@ function readOrigins(value: string | undefined): string[] {
         throw new Error(`Invalid CORS_ALLOWED_ORIGINS entry: ${origin}`);
       }
     });
+
+  // Deduplicate while preserving order.
+  const unique = [...new Set(raw)];
+
+  if (unique.length > 0) {
+    console.log(`[config] CORS allowed origins (${unique.length}):`, unique.join(", "));
+  }
+
+  return unique;
 }
 
 function readRuntimeMode(value: string | undefined): RuntimeMode {
