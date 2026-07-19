@@ -223,7 +223,10 @@ export function getRuntimeCapabilities(config: AppConfig, startupValidated = tru
 export function shouldExposeCapability(config: AppConfig, name: string, startupValidated = true): boolean {
   const capability = capabilityByName(name);
   if (!capability) return false;
-  if (!capability.write_capable) return config.runtimeEnabled && startupValidated;
+  if (!capability.write_capable) {
+    if (name === "ds_ping" || name === "get_capabilities") return startupValidated;
+    return config.runtimeEnabled && startupValidated;
+  }
   return !disabledReason(config, capability, startupValidated);
 }
 
